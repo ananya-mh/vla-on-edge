@@ -13,15 +13,15 @@ class ScriptedAdapter(ModelAdapter):
         self.raw_output = raw_output
         self.truncated = truncated
 
-    def decide(self, observation, history):
-        return Decision(raw_output=self.raw_output, prompt_hash="test", truncated=self.truncated, total_s=0.0)
+    def decide(self, prompt):
+        return Decision(raw_output=self.raw_output, truncated=self.truncated, total_s=0.0)
 
 
 class TimingOutAdapter(ModelAdapter):
     def __init__(self) -> None:
         super().__init__({}, {})
 
-    def decide(self, observation, history):
+    def decide(self, prompt):
         raise TimeoutError("no answer")
 
 
@@ -63,6 +63,25 @@ def test_timeout_falls_back(agent_config, scenarios):
     record, _ = run_step(env, TimingOutAdapter(), [], agent_config)
     assert record["fallback_reason"] == "timeout"
     assert record["raw_output"] is None
+    assert record["prompt_hash"]  # the prompt was still built and hashed
+
+
+def test_adapter_receives_the_loop_built_prompt(agent_config, scenarios):
+    received = []
+
+    class RecordingAdapter(ScriptedAdapter):
+        def decide(self, prompt):
+            received.append(prompt)
+            return super().decide(prompt)
+
+    env = make_env(agent_config, scenarios["blocked_lane"])
+    privileged_gap = env.observe().nearest_obstacle_ahead_m
+    run_step(env, RecordingAdapter('{"action": "KEEP_LANE"}'), [], agent_config)
+    prompt = received[0]
+    assert "Speed: 8.0 m/s" in prompt.user_text
+    assert set(prompt.images) == {"front", "rear"}
+    # Privileged data must never reach the model.
+    assert f"{privileged_gap:.0f}" not in prompt.user_text
 
 
 def test_validation_error_keeps_parsed_action_in_log(agent_config, scenarios):
