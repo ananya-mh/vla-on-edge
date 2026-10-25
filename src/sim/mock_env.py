@@ -1,4 +1,4 @@
-"""A tiny 2D driving world for developing and testing the pipeline without GPUs or AlpaSim.
+"""A tiny 2D driving world for developing and testing the pipeline without GPUs or the real simulator.
 
 The world is a straight road corridor along the world x axis, centered on y = 0, with
 round static obstacles. The goal is the end of the corridor. Camera frames are simple

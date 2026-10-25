@@ -1,4 +1,4 @@
-"""The simulator interface. Both the mock simulator and AlpaSim implement it."""
+"""The simulator interface. Both the mock and the real simulator implement it."""
 
 from dataclasses import dataclass
 
