@@ -25,6 +25,11 @@ class TimingOutAdapter(ModelAdapter):
         raise TimeoutError("no answer")
 
 
+def place_ego_at_gap(env, gap_m):
+    """Move the ego so the blocked_lane obstacle (x=60, radius 2) is `gap_m` ahead."""
+    env.ego.x = 60.0 - 2.0 - env.scenario["ego_radius_m"] - gap_m
+
+
 def make_env(agent_config, scenario):
     env = MockEnv(agent_config)
     env.reset(scenario, seed=0)
@@ -47,11 +52,10 @@ def test_parse_error_falls_back_to_slow_down_on_open_road(agent_config, scenario
 
 
 def test_fallback_is_stop_near_obstacle(agent_config, scenarios):
-    # blocked_lane has an obstacle (radius 2) at x=60; put the gap 1 m inside the
-    # fallback distance but outside the safety distance, so only the fallback acts.
-    scenario = scenarios["blocked_lane"]
-    env = make_env(agent_config, scenario)
-    env.ego.x = 60.0 - 2.0 - scenario["ego_radius_m"] - agent_config["fallback"]["stop_distance_m"] + 1.0
+    # At 8 m/s the stopping distance is 8 m, so the fallback threshold is 8 + 10 m.
+    agent_config = {**agent_config, "safety": {**agent_config["safety"], "enabled": True}}
+    env = make_env(agent_config, scenarios["blocked_lane"])
+    place_ego_at_gap(env, 17.0)  # inside the fallback threshold, outside safety's 8 + 5 m
     record, _ = run_step(env, ScriptedAdapter("garbage"), [], agent_config)
     assert record["fallback_reason"] == "parse_error"
     assert record["safety_override"] is None
@@ -102,12 +106,20 @@ def test_truncated_but_valid_output_is_accepted(agent_config, scenarios):
     assert record["executed_action"] == {"meta_action": "KEEP_LANE"}
 
 
+def test_safety_is_off_by_default(agent_config, scenarios):
+    env = make_env(agent_config, scenarios["blocked_lane"])
+    place_ego_at_gap(env, 3.0)
+    record, _ = run_step(env, ScriptedAdapter('{"action": "ACCELERATE"}'), [], agent_config)
+    assert record["safety_override"] is None
+    assert record["executed_action"] == {"meta_action": "ACCELERATE"}
+
+
 def test_safety_override_is_logged_separately_from_fallback(agent_config, scenarios):
-    scenario = scenarios["blocked_lane"]
-    env = make_env(agent_config, scenario)
-    env.ego.x = 60.0 - 2.0 - scenario["ego_radius_m"] - 3.0  # 3 m gap to the obstacle
+    agent_config = {**agent_config, "safety": {**agent_config["safety"], "enabled": True}}
+    env = make_env(agent_config, scenarios["blocked_lane"])
+    place_ego_at_gap(env, 3.0)
     record, _ = run_step(env, ScriptedAdapter('{"action": "ACCELERATE"}'), [], agent_config)
     assert record["fallback_reason"] is None
     assert record["parsed_action"] == {"meta_action": "ACCELERATE"}
-    assert record["safety_override"] == "obstacle_within_stop_distance"
+    assert record["safety_override"] == "obstacle_within_stopping_distance"
     assert record["executed_action"] == {"meta_action": "STOP"}

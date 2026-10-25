@@ -24,15 +24,20 @@ controller:
   steer_yaw_rate_rps: 0.15
   integration_dt_s: 0.1
 
-# Fallback after a parse error, validation error, or timeout:
-# STOP if an obstacle is within stop_distance_m ahead, otherwise SLOW_DOWN.
-fallback:
-  stop_distance_m: 15.0
+# Both thresholds below are speed-dependent: the stopping distance at the current
+# speed (speed^2 / (2 * controller.stop_decel_mps2)) plus a margin.
 
-# Rule-based override of valid actions: STOP if an obstacle is within stop_distance_m.
+# Fallback after a parse error, validation error, or timeout:
+# STOP if an obstacle is within stopping distance + stop_margin_m, otherwise SLOW_DOWN.
+fallback:
+  stop_margin_m: 10.0
+
+# Rule-based override of valid actions: STOP if an obstacle is within stopping
+# distance + stop_margin_m. Off for benchmark runs, since it hides model mistakes;
+# the experiment smoke_test_safety turns it on for the secondary result.
 safety:
-  enabled: true
-  stop_distance_m: 8.0
+  enabled: false
+  stop_margin_m: 5.0
 
 prompt:
   system: |

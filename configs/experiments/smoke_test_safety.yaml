@@ -1,0 +1,8 @@
+# Secondary result: the smoke test with the rule-based safety override turned on.
+scenarios: [open_corridor, scattered_obstacles, blocked_lane, narrow_corridor]
+seeds: [0, 1]
+scenario_overrides:
+  max_steps: 40
+agent_overrides:
+  safety:
+    enabled: true
