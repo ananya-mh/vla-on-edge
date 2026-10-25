@@ -43,6 +43,21 @@ def load_scenarios(config_dir: Path) -> dict[str, dict]:
     return scenarios
 
 
+def apply_overrides(base: dict, overrides: dict) -> dict:
+    """Return a copy of `base` with `overrides` applied, merging nested sections one level deep.
+
+    For example, {"safety": {"enabled": True}} changes only safety.enabled and keeps
+    the other safety settings.
+    """
+    merged = dict(base)
+    for key, value in overrides.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            merged[key] = {**base[key], **value}
+        else:
+            merged[key] = value
+    return merged
+
+
 def resolve_run_config(model_spec: str, experiment_name: str, sim: str, config_dir: Path = CONFIG_DIR) -> dict:
     """Combine model, agent, experiment, and scenario configs into one dict for a run."""
     name, variant = parse_model_spec(model_spec)
@@ -58,7 +73,8 @@ def resolve_run_config(model_spec: str, experiment_name: str, sim: str, config_d
 
     return {
         "model": load_model_config(config_dir, name, variant),
-        "agent": load_yaml(config_dir / "agent.yaml"),
+        # Experiment-level overrides apply to every model alike, so fairness is kept.
+        "agent": apply_overrides(load_yaml(config_dir / "agent.yaml"), experiment.get("agent_overrides", {})),
         "experiment": {"name": experiment_name, **experiment},
         "scenarios": scenarios,
         "sim": sim,
