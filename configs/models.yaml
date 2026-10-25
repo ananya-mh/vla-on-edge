@@ -1,0 +1,9 @@
+# Model registry. The real models and the shared serving section
+# (gpu_memory_utilization, max_model_len) are added in milestone (b).
+
+models:
+  dummy:
+    adapter: dummy           # random valid actions, for testing the pipeline
+    variant: bf16            # not meaningful for the dummy; kept so every entry has one
+    reasoning: false
+    seed: 0

@@ -1,0 +1,55 @@
+# Agent settings shared by every model. Fairness: never vary these per model.
+
+action_format: meta_action   # meta_action | waypoints
+history_length: 4            # number of past executed actions shown in the prompt
+max_tokens: 1024             # used by model adapters from milestone (b)
+timeout_s: 30.0              # a slower answer counts as a timeout and falls back
+
+waypoints:
+  count: 6
+  spacing_s: 0.5             # expected times: 0.5, 1.0, ..., 3.0 s
+  time_tolerance_s: 0.05
+
+# Physical limits used by the validator and the controller.
+limits:
+  max_speed_mps: 15.0
+  max_accel_mps2: 2.0
+  max_decel_mps2: 6.0
+
+# How meta-actions become trajectories (src/controller/trajectory.py).
+controller:
+  accelerate_mps2: 1.0
+  slow_down_decel_mps2: 2.0
+  stop_decel_mps2: 4.0
+  steer_yaw_rate_rps: 0.15
+  integration_dt_s: 0.1
+
+# Fallback after a parse error, validation error, or timeout:
+# STOP if an obstacle is within stop_distance_m ahead, otherwise SLOW_DOWN.
+fallback:
+  stop_distance_m: 15.0
+
+# Rule-based override of valid actions: STOP if an obstacle is within stop_distance_m.
+safety:
+  enabled: true
+  stop_distance_m: 8.0
+
+prompt:
+  system: |
+    You are the driving policy of an autonomous off-road truck. Each step you see
+    camera images and the vehicle state, and you choose the next action. Drive
+    toward the goal, stay inside the drivable corridor, and avoid all obstacles.
+  user_template: |
+    Camera views: {view_names}.
+    Speed: {speed_mps:.1f} m/s. Distance to goal: {distance_to_goal_m:.0f} m.
+    Goal bearing: {goal_bearing_deg:+.0f} degrees (positive = left).
+    Recent actions, oldest first: {history}.
+    {output_instructions}
+  output_instructions:
+    meta_action: |
+      Reply with only a JSON object of the form {{"action": "<ACTION>"}}, where
+      <ACTION> is one of KEEP_LANE, ACCELERATE, SLOW_DOWN, STOP, STEER_LEFT, STEER_RIGHT.
+    waypoints: |
+      Reply with only a JSON object of the form {{"waypoints": [[x, y, t], ...]}} with
+      exactly {count} points spaced {spacing_s} s apart, starting at t = {spacing_s} s.
+      x is meters forward and y is meters to the left, relative to the vehicle now.

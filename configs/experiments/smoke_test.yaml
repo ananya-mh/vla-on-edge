@@ -1,0 +1,5 @@
+# Quick end-to-end check: every scenario, two seeds, short episodes.
+scenarios: [open_corridor, scattered_obstacles, blocked_lane, narrow_corridor]
+seeds: [0, 1]
+scenario_overrides:
+  max_steps: 40

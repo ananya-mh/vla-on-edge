@@ -1,0 +1,94 @@
+"""Tests for the agent loop's fallback, safety override, and truncation handling."""
+
+from src.adapters.base import Decision, ModelAdapter
+from src.agent.loop import run_step
+from src.sim.mock_env import MockEnv
+
+
+class ScriptedAdapter(ModelAdapter):
+    """Returns a fixed raw output, optionally marked truncated."""
+
+    def __init__(self, raw_output: str, truncated: bool = False) -> None:
+        super().__init__({}, {})
+        self.raw_output = raw_output
+        self.truncated = truncated
+
+    def decide(self, observation, history):
+        return Decision(raw_output=self.raw_output, prompt_hash="test", truncated=self.truncated, total_s=0.0)
+
+
+class TimingOutAdapter(ModelAdapter):
+    def __init__(self) -> None:
+        super().__init__({}, {})
+
+    def decide(self, observation, history):
+        raise TimeoutError("no answer")
+
+
+def make_env(agent_config, scenario):
+    env = MockEnv(agent_config)
+    env.reset(scenario, seed=0)
+    return env
+
+
+def test_valid_output_is_executed(agent_config, scenarios):
+    env = make_env(agent_config, scenarios["open_corridor"])
+    record, action = run_step(env, ScriptedAdapter('{"action": "ACCELERATE"}'), [], agent_config)
+    assert record["fallback_reason"] is None
+    assert record["executed_action"] == {"meta_action": "ACCELERATE"}
+
+
+def test_parse_error_falls_back_to_slow_down_on_open_road(agent_config, scenarios):
+    env = make_env(agent_config, scenarios["open_corridor"])
+    record, _ = run_step(env, ScriptedAdapter("I think we should accelerate."), [], agent_config)
+    assert record["fallback_reason"] == "parse_error"
+    assert record["parsed_action"] is None
+    assert record["executed_action"] == {"meta_action": "SLOW_DOWN"}
+
+
+def test_fallback_is_stop_near_obstacle(agent_config, scenarios):
+    # blocked_lane has an obstacle (radius 2) at x=60; put the gap 1 m inside the
+    # fallback distance but outside the safety distance, so only the fallback acts.
+    scenario = scenarios["blocked_lane"]
+    env = make_env(agent_config, scenario)
+    env.ego.x = 60.0 - 2.0 - scenario["ego_radius_m"] - agent_config["fallback"]["stop_distance_m"] + 1.0
+    record, _ = run_step(env, ScriptedAdapter("garbage"), [], agent_config)
+    assert record["fallback_reason"] == "parse_error"
+    assert record["safety_override"] is None
+    assert record["executed_action"] == {"meta_action": "STOP"}
+
+
+def test_timeout_falls_back(agent_config, scenarios):
+    env = make_env(agent_config, scenarios["open_corridor"])
+    record, _ = run_step(env, TimingOutAdapter(), [], agent_config)
+    assert record["fallback_reason"] == "timeout"
+    assert record["raw_output"] is None
+
+
+def test_validation_error_keeps_parsed_action_in_log(agent_config, scenarios):
+    agent_config = {**agent_config, "action_format": "waypoints"}
+    env = make_env(agent_config, scenarios["open_corridor"])
+    short_list = '{"waypoints": [[4, 0, 0.5], [8, 0, 1.0]]}'
+    record, _ = run_step(env, ScriptedAdapter(short_list, truncated=True), [], agent_config)
+    assert record["fallback_reason"] == "validation_error"
+    assert record["parsed_action"] is not None
+    assert record["truncated"] is True
+
+
+def test_truncated_but_valid_output_is_accepted(agent_config, scenarios):
+    env = make_env(agent_config, scenarios["open_corridor"])
+    record, _ = run_step(env, ScriptedAdapter('{"action": "KEEP_LANE"}', truncated=True), [], agent_config)
+    assert record["truncated"] is True
+    assert record["fallback_reason"] is None
+    assert record["executed_action"] == {"meta_action": "KEEP_LANE"}
+
+
+def test_safety_override_is_logged_separately_from_fallback(agent_config, scenarios):
+    scenario = scenarios["blocked_lane"]
+    env = make_env(agent_config, scenario)
+    env.ego.x = 60.0 - 2.0 - scenario["ego_radius_m"] - 3.0  # 3 m gap to the obstacle
+    record, _ = run_step(env, ScriptedAdapter('{"action": "ACCELERATE"}'), [], agent_config)
+    assert record["fallback_reason"] is None
+    assert record["parsed_action"] == {"meta_action": "ACCELERATE"}
+    assert record["safety_override"] == "obstacle_within_stop_distance"
+    assert record["executed_action"] == {"meta_action": "STOP"}
