@@ -1,7 +1,8 @@
 """The observe → reason → act loop that drives one episode with one model.
 
-Per step: observe → call the adapter → parse strictly → validate → fall back if
-needed → safety check → step the simulator → write one JSONL record. Metrics are
+Per step: observe → build one model-agnostic prompt → call the adapter → parse
+strictly → validate → fall back if needed → safety check → step the simulator →
+write one JSONL record. Metrics are
 computed later from these records, never here.
 
 In milestone (a) the loop talks to the SimEnv directly; milestone (b) puts the MCP
@@ -12,17 +13,16 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
-from src.adapters.base import Action, Decision, ModelAdapter, Observation
+from src.adapters.base import Action, Decision, ModelAdapter, Observation, Prompt
 from src.agent.parser import ParseError, parse_action
+from src.agent.prompts import build_prompt, prompt_hash
 from src.agent.safety import apply_safety_check, choose_fallback
 from src.agent.validator import validate_action
 from src.sim.base import SimEnv
 from src.utils.logging import append_jsonl
 
 
-def call_adapter(
-    adapter: ModelAdapter, observation: Observation, history: list[Action], timeout_s: float
-) -> tuple[Decision | None, str | None]:
+def call_adapter(adapter: ModelAdapter, prompt: Prompt, timeout_s: float) -> tuple[Decision | None, str | None]:
     """Call the adapter and return (decision, timeout_detail).
 
     timeout_detail is None unless the adapter raised TimeoutError or answered late.
@@ -30,7 +30,7 @@ def call_adapter(
     """
     start = time.perf_counter()
     try:
-        decision = adapter.decide(observation, history)
+        decision = adapter.decide(prompt)
     except TimeoutError as error:
         return None, str(error) or "adapter raised TimeoutError"
     elapsed = time.perf_counter() - start
@@ -66,8 +66,13 @@ def run_step(
     recent_history = history[-history_length:] if history_length > 0 else []
 
     step_start = time.perf_counter()
-    decision, timeout_detail = call_adapter(adapter, observation, recent_history, agent_config["timeout_s"])
-    adapter_s = time.perf_counter() - step_start
+    prompt = build_prompt(observation, recent_history, agent_config)
+    current_prompt_hash = prompt_hash(prompt)
+    prompt_build_s = time.perf_counter() - step_start
+
+    adapter_start = time.perf_counter()
+    decision, timeout_detail = call_adapter(adapter, prompt, agent_config["timeout_s"])
+    adapter_s = time.perf_counter() - adapter_start
 
     parse_start = time.perf_counter()
     parsed_action, fallback_reason, fallback_detail = None, None, None
@@ -87,7 +92,7 @@ def run_step(
     record = {
         "step_index": observation.step_index,
         "timestamp_s": observation.timestamp_s,
-        "prompt_hash": decision.prompt_hash if decision else None,
+        "prompt_hash": current_prompt_hash,
         "raw_output": decision.raw_output if decision else None,
         "parsed_action": parsed_action.to_dict() if parsed_action else None,
         "executed_action": executed_action.to_dict(),
@@ -98,6 +103,7 @@ def run_step(
         "prompt_tokens": decision.prompt_tokens if decision else None,
         "completion_tokens": decision.completion_tokens if decision else None,
         "latency_s": {
+            "prompt_build": prompt_build_s,
             "adapter": adapter_s,
             "ttft": decision.ttft_s if decision else None,
             "decode": decision.decode_s if decision else None,

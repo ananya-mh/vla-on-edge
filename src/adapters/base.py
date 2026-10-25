@@ -1,7 +1,8 @@
 """Core data types shared by every model adapter, the agent loop, and the simulators.
 
-`Observation` is what the simulator shows the agent, `Action` is what the agent sends
-back, and `Decision` is what a model adapter returns for one step.
+`Observation` is what the simulator shows the agent, `Prompt` is the model-agnostic
+input the agent builds from it, `Decision` is what a model adapter returns for one
+step, and `Action` is what the agent sends back to the simulator.
 """
 
 from dataclasses import dataclass
@@ -83,6 +84,18 @@ class Observation:
 
 
 @dataclass
+class Prompt:
+    """The model input for one step, identical for every model.
+
+    The agent loop builds it; adapters only translate it into their API's format.
+    """
+
+    system_text: str
+    user_text: str
+    images: dict[str, np.ndarray]  # view name -> H x W x 3 uint8 image, in a fixed (sorted) order
+
+
+@dataclass
 class Decision:
     """One model call: the raw text plus token counts and timing.
 
@@ -91,7 +104,6 @@ class Decision:
     """
 
     raw_output: str
-    prompt_hash: str
     truncated: bool  # the model hit max_tokens before finishing
     total_s: float
     prompt_tokens: int | None = None
@@ -107,10 +119,10 @@ class ModelAdapter:
         self.model_config = model_config
         self.agent_config = agent_config
 
-    def decide(self, observation: Observation, history: list[Action]) -> Decision:
-        """Return the model's raw decision for this observation.
+    def decide(self, prompt: Prompt) -> Decision:
+        """Send the prompt to the model and return its raw decision.
 
-        `history` holds the most recent executed actions, oldest first. Adapters
-        should raise TimeoutError if the model does not answer in time.
+        Adapters must not change the prompt's content, only its format. They should
+        raise TimeoutError if the model does not answer in time.
         """
         raise NotImplementedError

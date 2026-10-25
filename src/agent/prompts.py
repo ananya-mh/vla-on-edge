@@ -1,25 +1,14 @@
 """Builds the prompt every model sees, from the templates in agent.yaml.
 
-All adapters call `build_prompt`, so every model gets the same text and images for
-the same observation. The prompt hash lets us check that in the logs.
+The agent loop calls `build_prompt` once per step and hands the same `Prompt` to
+whichever adapter is running, so every model gets the same text and images for the
+same observation. The prompt hash lets us check that in the logs.
 """
 
 import hashlib
 import math
-from dataclasses import dataclass
 
-import numpy as np
-
-from src.adapters.base import Action, Observation
-
-
-@dataclass
-class Prompt:
-    """The model input for one step."""
-
-    system_text: str
-    user_text: str
-    images: dict[str, np.ndarray]  # view name -> image, in a fixed (sorted) order
+from src.adapters.base import Action, Observation, Prompt
 
 
 def describe_history(history: list[Action]) -> str:
