@@ -2,7 +2,7 @@
 
 action_format: meta_action   # meta_action | waypoints
 history_length: 4            # number of past executed actions shown in the prompt
-max_tokens: 1024             # used by model adapters from milestone (b)
+max_tokens: 2048             # same for all models; used by model adapters from milestone (b)
 timeout_s: 30.0              # a slower answer counts as a timeout and falls back
 
 waypoints:
