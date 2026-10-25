@@ -17,9 +17,9 @@ from pathlib import Path
 from src.adapters.base import ModelAdapter
 from src.adapters.dummy_adapter import DummyAdapter
 from src.agent.loop import run_episode
-from src.sim.alpasim_env import AlpaSimEnv
 from src.sim.base import SimEnv
 from src.sim.mock_env import MockEnv
+from src.sim.real_env import RealSimEnv
 from src.utils.config import resolve_run_config
 from src.utils.logging import append_jsonl
 from src.utils.run_metadata import build_run_metadata, save_run_metadata
@@ -42,7 +42,7 @@ def create_env(sim: str, agent_config: dict) -> SimEnv:
     """Instantiate the requested simulator."""
     if sim == "mock":
         return MockEnv(agent_config)
-    return AlpaSimEnv(agent_config)
+    return RealSimEnv(agent_config)
 
 
 def make_run_dir(results_dir: Path, run_config: dict) -> Path:
@@ -60,7 +60,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--model", required=True, help="model name from models.yaml, optionally name:variant")
     parser.add_argument("--experiment", required=True, help="experiment name from configs/experiments/")
-    parser.add_argument("--sim", choices=["mock", "alpasim"], default="mock")
+    parser.add_argument("--sim", choices=["mock", "real"], default="mock")
     parser.add_argument("--dry-run", action="store_true", help="print the resolved config and episodes, then exit")
     parser.add_argument("--results-dir", type=Path, default=DEFAULT_RESULTS_DIR)
     return parser.parse_args(argv)
