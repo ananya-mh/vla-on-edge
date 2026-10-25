@@ -3,4 +3,9 @@
 #   bash scripts/run_benchmark.sh --model dummy:bf16 --experiment smoke_test --sim mock [--dry-run]
 set -euo pipefail
 cd "$(dirname "$0")/.."
-python -m src.run_benchmark "$@"
+PYTHON=".venv/bin/python"
+if [ ! -x "$PYTHON" ]; then
+  echo "No virtual environment found. Run: source scripts/setup_env.sh" >&2
+  exit 1
+fi
+"$PYTHON" -m src.run_benchmark "$@"
