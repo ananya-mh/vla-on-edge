@@ -1,0 +1,28 @@
+# Scenarios for the mock simulator. Each entry is merged over `defaults`.
+# Episodes are seeded by the experiment's seeds; the seed places random obstacles.
+
+defaults:
+  road_length_m: 150.0
+  road_width_m: 10.0
+  step_dt_s: 0.5             # simulated time per decision
+  initial_speed_mps: 8.0
+  max_steps: 120
+  ego_radius_m: 1.5          # the ego footprint is a circle
+  obstacle_min_x_m: 30.0     # random obstacles start this far down the road
+  random_obstacles: 0
+  fixed_obstacles: []        # [x, y, radius] in meters, world frame
+  image_size_px: 256
+  view_range_m: 40.0         # each camera render covers view_range_m x view_range_m
+  tags: []                   # "edge_case" scenarios are reported separately
+
+scenarios:
+  open_corridor: {}
+  scattered_obstacles:
+    random_obstacles: 4
+  blocked_lane:
+    fixed_obstacles: [[60.0, 0.0, 2.0]]
+    tags: [edge_case]
+  narrow_corridor:
+    road_width_m: 6.0
+    random_obstacles: 2
+    tags: [edge_case]
