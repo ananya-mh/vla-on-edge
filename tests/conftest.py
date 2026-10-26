@@ -16,6 +16,11 @@ def scenarios() -> dict[str, dict]:
 
 
 @pytest.fixture
-def trajectory_spec() -> dict:
-    """The dummy model's trajectory spec: 6 points, 0.5 s apart."""
-    return load_model_config(CONFIG_DIR, "dummy", None)["trajectory"]
+def model_config() -> dict:
+    """The dummy model's resolved config (6 points 0.5 s apart, enforce mode)."""
+    return load_model_config(CONFIG_DIR, "dummy", None)
+
+
+@pytest.fixture
+def trajectory_spec(model_config) -> dict:
+    return model_config["trajectory"]

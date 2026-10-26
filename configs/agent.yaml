@@ -14,6 +14,7 @@ limits:
   max_accel_mps2: 2.0
   max_decel_mps2: 6.0
   waypoint_time_tolerance_s: 0.05
+  speed_window_s: 0.5        # speed/accel are averaged over this window, not per 0.1 s step
 
 # How meta-actions become trajectories (src/controller/trajectory.py).
 controller:

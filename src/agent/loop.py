@@ -17,7 +17,7 @@ from src.adapters.base import Action, Decision, ModelAdapter, Observation, Promp
 from src.agent.parser import ParseError, parse_action
 from src.agent.prompts import build_prompt, prompt_hash
 from src.agent.safety import apply_safety_check, choose_fallback
-from src.agent.validator import validate_action
+from src.agent.validator import find_violations
 from src.sim.base import SimEnv
 from src.utils.logging import append_jsonl
 
@@ -40,36 +40,40 @@ def call_adapter(adapter: ModelAdapter, prompt: Prompt, timeout_s: float) -> tup
 
 
 def parse_and_validate(
-    raw_output: str, observation: Observation, agent_config: dict, trajectory_spec: dict
-) -> tuple[Action | None, str | None, str | None]:
-    """Return (parsed_action, fallback_reason, fallback_detail).
+    raw_output: str, observation: Observation, agent_config: dict, model_config: dict
+) -> tuple[Action | None, list[str], str | None, str | None]:
+    """Return (parsed_action, violations, fallback_reason, fallback_detail).
 
     parsed_action is None if parsing failed. If parsing worked but validation did
-    not, the parsed action is still returned so it can be logged.
+    not, the parsed action is still returned so it can be logged. In `flag_only`
+    mode, violations are returned but never cause a fallback.
     """
     try:
         action = parse_action(raw_output, agent_config["action_format"])
     except ParseError as error:
-        return None, "parse_error", str(error)
-    problem = validate_action(action, observation.ego.speed_mps, trajectory_spec, agent_config["limits"])
-    if problem is not None:
-        return action, "validation_error", problem
-    return action, None, None
+        return None, [], "parse_error", str(error)
+    violations = find_violations(
+        action, observation.ego.speed_mps, model_config["trajectory"], agent_config["limits"]
+    )
+    if violations and model_config["validation_mode"] == "enforce":
+        return action, violations, "validation_error", violations[0]
+    return action, violations, None, None
 
 
 def run_step(
-    env: SimEnv, adapter: ModelAdapter, history: list[Action], agent_config: dict, trajectory_spec: dict
+    env: SimEnv, adapter: ModelAdapter, history: list[Action], agent_config: dict, model_config: dict
 ) -> tuple[dict, Action]:
     """Run one decision step. Return the step's log record and the executed action.
 
-    `trajectory_spec` is the model's native trajectory shape from models.yaml.
+    `model_config` is the model's resolved models.yaml entry (trajectory shape and
+    validation mode).
     """
     observation = env.observe()
     history_length = agent_config["history_length"]
     recent_history = history[-history_length:] if history_length > 0 else []
 
     step_start = time.perf_counter()
-    prompt = build_prompt(observation, recent_history, agent_config, trajectory_spec)
+    prompt = build_prompt(observation, recent_history, agent_config, model_config["trajectory"])
     current_prompt_hash = prompt_hash(prompt)
     prompt_build_s = time.perf_counter() - step_start
 
@@ -78,12 +82,12 @@ def run_step(
     adapter_s = time.perf_counter() - adapter_start
 
     parse_start = time.perf_counter()
-    parsed_action, fallback_reason, fallback_detail = None, None, None
+    parsed_action, violations, fallback_reason, fallback_detail = None, [], None, None
     if timeout_detail is not None:
         fallback_reason, fallback_detail = "timeout", timeout_detail
     else:
-        parsed_action, fallback_reason, fallback_detail = parse_and_validate(
-            decision.raw_output, observation, agent_config, trajectory_spec
+        parsed_action, violations, fallback_reason, fallback_detail = parse_and_validate(
+            decision.raw_output, observation, agent_config, model_config
         )
     parse_validate_s = time.perf_counter() - parse_start
 
@@ -100,6 +104,7 @@ def run_step(
         # The model's full native trajectory, exactly as output (never resampled).
         "parsed_action": parsed_action.to_dict() if parsed_action else None,
         "executed_action": executed_action.to_dict(),
+        "validation_violations": violations,
         "fallback_reason": fallback_reason,
         "fallback_detail": fallback_detail,
         "safety_override": safety_override,
@@ -127,14 +132,14 @@ def run_episode(
     scenario: dict,
     seed: int,
     agent_config: dict,
-    trajectory_spec: dict,
+    model_config: dict,
     steps_log_path: Path,
 ) -> dict:
     """Drive one episode, append a record per step to `steps_log_path`, return the sim's metrics."""
     env.reset(scenario, seed)
     history: list[Action] = []
     while not env.done():
-        record, executed_action = run_step(env, adapter, history, agent_config, trajectory_spec)
+        record, executed_action = run_step(env, adapter, history, agent_config, model_config)
         history.append(executed_action)
         append_jsonl(steps_log_path, {"scenario": scenario["name"], "seed": seed, **record})
     return env.metrics()

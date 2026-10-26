@@ -3,7 +3,7 @@
 import pytest
 
 from src.adapters.base import Action, MetaAction, Waypoint
-from src.agent.validator import validate_action
+from src.agent.validator import find_violations, validate_action
 from src.controller.trajectory import meta_action_to_waypoints
 from src.utils.config import check_trajectory_spec
 
@@ -83,3 +83,45 @@ def test_native_trajectory_shape_is_validated_as_is(agent_config):
 def test_inconsistent_trajectory_spec_is_rejected():
     with pytest.raises(ValueError, match="horizon_s"):
         check_trajectory_spec("bad", {"waypoint_count": 64, "spacing_s": 0.1, "horizon_s": 6.0})
+
+
+def ten_hz_waypoints(speed_mps: float, count: int = 64) -> list[Waypoint]:
+    return [Waypoint(x=speed_mps * 0.1 * (i + 1), y=0.0, t=round(0.1 * (i + 1), 1)) for i in range(count)]
+
+
+TEN_HZ_SPEC = {"waypoint_count": 64, "spacing_s": 0.1, "horizon_s": 6.4}
+
+
+def test_window_smooths_position_noise(agent_config):
+    # 8 m/s with +-5 cm zig-zag noise: per-0.1 s differences swing about +-1 m/s
+    # (+-20 m/s^2), but 0.5 s windows see the true, constant speed.
+    noisy = []
+    for index, point in enumerate(ten_hz_waypoints(8.0)):
+        noise = 0.05 if index % 2 == 0 else -0.05
+        noisy.append(Waypoint(x=point.x + noise, y=0.0, t=point.t))
+    action = Action(waypoints=noisy)
+    assert find_violations(action, 8.0, TEN_HZ_SPEC, agent_config["limits"]) == []
+
+    per_step_limits = {**agent_config["limits"], "speed_window_s": 0.1}
+    assert any("acceleration" in v for v in find_violations(action, 8.0, TEN_HZ_SPEC, per_step_limits))
+
+
+def test_all_broken_rules_are_reported(agent_config, trajectory_spec):
+    # 20 m/s from 8 m/s: too fast and too much acceleration, one message each.
+    action = Action(waypoints=constant_speed_waypoints(20.0))
+    violations = find_violations(action, 8.0, trajectory_spec, agent_config["limits"])
+    assert len(violations) == 2
+    assert "speed" in violations[0] and "acceleration" in violations[1]
+
+
+def test_window_longer_than_horizon_is_clamped(agent_config):
+    short_spec = {"waypoint_count": 3, "spacing_s": 0.1, "horizon_s": 0.3}
+    action = Action(waypoints=ten_hz_waypoints(8.0, count=3))
+    assert find_violations(action, 8.0, short_spec, agent_config["limits"]) == []
+
+
+def test_rotation_is_ignored_by_the_validator(agent_config):
+    # A nonsense rotation must not affect validation: only positions are checked.
+    bad_rotation = ((9.0, 9.0, 9.0), (9.0, 9.0, 9.0), (9.0, 9.0, 9.0))
+    waypoints = [Waypoint(p.x, p.y, p.t, z=0.0, rotation=bad_rotation) for p in ten_hz_waypoints(8.0)]
+    assert find_violations(Action(waypoints=waypoints), 8.0, TEN_HZ_SPEC, agent_config["limits"]) == []

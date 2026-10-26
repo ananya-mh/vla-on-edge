@@ -91,7 +91,7 @@ def main(argv: list[str] | None = None) -> Path | None:
                 scenario,
                 seed,
                 run_config["agent"],
-                run_config["model"]["trajectory"],
+                run_config["model"],
                 run_dir / "steps.jsonl",
             )
             episode_record = {"scenario": scenario["name"], "seed": seed, "tags": scenario["tags"], **episode_metrics}

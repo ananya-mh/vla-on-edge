@@ -24,11 +24,26 @@ class MetaAction(str, Enum):
 
 @dataclass(frozen=True)
 class Waypoint:
-    """A future ego position in the ego frame: meters (x forward, y left), t seconds from now."""
+    """A future ego position in the ego frame: meters (x forward, y left), t seconds from now.
+
+    Models that output a full pose (e.g. Alpamayo: xyz plus a 3x3 rotation) also fill
+    `z` and `rotation`. These are logged but never validated.
+    """
 
     x: float
     y: float
     t: float
+    z: float | None = None
+    rotation: tuple[tuple[float, float, float], ...] | None = None  # 3x3, row-major
+
+    def to_dict(self) -> dict:
+        """Return a JSON-serializable form, including the full pose when present."""
+        result: dict = {"x": self.x, "y": self.y, "t": self.t}
+        if self.z is not None:
+            result["z"] = self.z
+        if self.rotation is not None:
+            result["rotation"] = [list(row) for row in self.rotation]
+        return result
 
 
 @dataclass
@@ -48,7 +63,7 @@ class Action:
         """Return a JSON-serializable form, used in step logs."""
         if self.meta_action is not None:
             return {"meta_action": self.meta_action.value}
-        return {"waypoints": [[point.x, point.y, point.t] for point in self.waypoints]}
+        return {"waypoints": [point.to_dict() for point in self.waypoints]}
 
     def describe(self) -> str:
         """Return a short human-readable form, used in prompts for the decision history."""

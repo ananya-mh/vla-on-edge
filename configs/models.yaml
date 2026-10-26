@@ -3,12 +3,17 @@
 # `trajectory` is the shape of the model's native trajectory output. The validator
 # checks outputs against it as-is (no resampling); horizon_s must equal
 # waypoint_count * spacing_s.
+#
+# `validation_mode`: `enforce` replaces an invalid action with the fallback;
+# `flag_only` logs the violations and executes the action unchanged (used for
+# Alpamayo, whose native trajectories we never replace).
 
 models:
   dummy:
     adapter: dummy           # random valid actions, for testing the pipeline
     variant: bf16            # not meaningful for the dummy; kept so every entry has one
     reasoning: false
+    validation_mode: enforce
     seed: 0
     trajectory:              # matches the controller's expansion of meta-actions
       waypoint_count: 6

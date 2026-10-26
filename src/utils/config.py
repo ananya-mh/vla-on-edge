@@ -33,15 +33,20 @@ def check_trajectory_spec(name: str, trajectory_spec: dict) -> None:
         )
 
 
+VALIDATION_MODES = ("enforce", "flag_only")
+
+
 def load_model_config(config_dir: Path, name: str, variant: str | None) -> dict:
     """Return the models.yaml entry for `name`, checking the requested variant."""
     models = load_yaml(config_dir / "models.yaml")["models"]
     if name not in models:
         raise ValueError(f"unknown model {name!r}; known models: {sorted(models)}")
-    model_config = {"name": name, "variant": "bf16", **models[name]}
+    model_config = {"name": name, "variant": "bf16", "validation_mode": "enforce", **models[name]}
     if variant is not None and variant != model_config["variant"]:
         raise ValueError(f"model {name!r} has variant {model_config['variant']!r}, not {variant!r}")
     check_trajectory_spec(name, model_config["trajectory"])
+    if model_config["validation_mode"] not in VALIDATION_MODES:
+        raise ValueError(f"model {name!r}: validation_mode must be one of {VALIDATION_MODES}")
     return model_config
 
 
