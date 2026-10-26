@@ -1,5 +1,8 @@
-# Model registry. The real models and the shared serving section
-# (gpu_memory_utilization, max_model_len) are added in milestone (b).
+# Model registry. The real models are added in milestone (b).
+#
+# `trajectory` is the shape of the model's native trajectory output. The validator
+# checks outputs against it as-is (no resampling); horizon_s must equal
+# waypoint_count * spacing_s.
 
 models:
   dummy:
@@ -7,3 +10,7 @@ models:
     variant: bf16            # not meaningful for the dummy; kept so every entry has one
     reasoning: false
     seed: 0
+    trajectory:              # matches the controller's expansion of meta-actions
+      waypoint_count: 6
+      spacing_s: 0.5
+      horizon_s: 3.0

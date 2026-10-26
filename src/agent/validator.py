@@ -1,9 +1,10 @@
-"""Checks a parsed Action against the expected format and simple physical limits.
+"""Checks an Action against the model's trajectory spec and simple physical limits.
 
-A meta-action is always valid once parsed (the controller enforces limits itself).
-A waypoint list must have exactly the configured number of points at the configured
-times, and the speed and acceleration it implies must stay within limits. Rejecting
-short lists matters because a truncated model output can still be valid JSON.
+A meta-action is always valid (the controller enforces limits itself). A waypoint
+list is checked as the model produced it, never resampled: it must have exactly the
+model's `waypoint_count` points at its `spacing_s`, and the speed and acceleration it
+implies must stay within limits. Rejecting short lists matters because a truncated
+model output can still be valid JSON.
 """
 
 import math
@@ -15,27 +16,33 @@ from src.controller.trajectory import waypoint_times
 BACKWARD_TOLERANCE_M = 0.1
 
 
-def validate_action(action: Action, current_speed_mps: float, agent_config: dict) -> str | None:
-    """Return None if the action is valid, otherwise a short reason it is not."""
+def validate_action(action: Action, current_speed_mps: float, trajectory_spec: dict, limits: dict) -> str | None:
+    """Return None if the action is valid, otherwise a short reason it is not.
+
+    `trajectory_spec` is the model's `trajectory` entry from models.yaml;
+    `limits` is the `limits` section of agent.yaml.
+    """
     if action.meta_action is not None:
         return None
-    return validate_waypoints(action.waypoints, current_speed_mps, agent_config)
+    return validate_waypoints(action.waypoints, current_speed_mps, trajectory_spec, limits)
 
 
-def validate_waypoints(waypoints: list[Waypoint], current_speed_mps: float, agent_config: dict) -> str | None:
+def validate_waypoints(
+    waypoints: list[Waypoint], current_speed_mps: float, trajectory_spec: dict, limits: dict
+) -> str | None:
     """Return None if the waypoints are complete and physically plausible, else a reason."""
-    expected_times = waypoint_times(agent_config)
+    expected_times = waypoint_times(trajectory_spec["waypoint_count"], trajectory_spec["spacing_s"])
     if len(waypoints) != len(expected_times):
         return f"expected {len(expected_times)} waypoints, got {len(waypoints)}"
 
-    tolerance = agent_config["waypoints"]["time_tolerance_s"]
+    tolerance = limits["waypoint_time_tolerance_s"]
     for point, expected_time in zip(waypoints, expected_times):
         if not all(math.isfinite(value) for value in (point.x, point.y, point.t)):
             return f"non-finite waypoint {point}"
         if abs(point.t - expected_time) > tolerance:
             return f"waypoint time {point.t} does not match expected {expected_time}"
 
-    return check_motion_limits(waypoints, current_speed_mps, agent_config["limits"])
+    return check_motion_limits(waypoints, current_speed_mps, limits)
 
 
 def check_motion_limits(waypoints: list[Waypoint], current_speed_mps: float, limits: dict) -> str | None:

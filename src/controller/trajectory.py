@@ -2,7 +2,8 @@
 
 Each meta-action is a constant acceleration and yaw rate held for the whole horizon.
 We integrate a simple unicycle model in small time steps and sample it at the
-configured waypoint times (e.g. 6 points, 0.5 s apart).
+controller's waypoint times (`controller.waypoint_count` points,
+`controller.waypoint_spacing_s` apart; 6 points, 0.5 s apart by default).
 """
 
 import math
@@ -10,11 +11,9 @@ import math
 from src.adapters.base import Action, MetaAction, Waypoint
 
 
-def waypoint_times(agent_config: dict) -> list[float]:
-    """Return the expected waypoint times, e.g. [0.5, 1.0, ..., 3.0]."""
-    count = agent_config["waypoints"]["count"]
-    spacing = agent_config["waypoints"]["spacing_s"]
-    return [spacing * (index + 1) for index in range(count)]
+def waypoint_times(count: int, spacing_s: float) -> list[float]:
+    """Return `count` waypoint times `spacing_s` apart, e.g. [0.5, 1.0, ..., 3.0]."""
+    return [spacing_s * (index + 1) for index in range(count)]
 
 
 def acceleration_for(meta_action: MetaAction, controller_config: dict) -> float:
@@ -49,7 +48,8 @@ def meta_action_to_waypoints(
 
     x, y, heading, speed, time = 0.0, 0.0, 0.0, current_speed_mps, 0.0
     waypoints = []
-    for target_time in waypoint_times(agent_config):
+    times = waypoint_times(controller_config["waypoint_count"], controller_config["waypoint_spacing_s"])
+    for target_time in times:
         while time < target_time - 1e-9:
             step = min(time_step, target_time - time)
             speed = min(max(speed + acceleration * step, 0.0), max_speed)

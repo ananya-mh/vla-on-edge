@@ -5,19 +5,20 @@ history_length: 4            # number of past executed actions shown in the prom
 max_tokens: 2048             # same for all models; used by model adapters from milestone (b)
 timeout_s: 30.0              # a slower answer counts as a timeout and falls back
 
-waypoints:
-  count: 6
-  spacing_s: 0.5             # expected times: 0.5, 1.0, ..., 3.0 s
-  time_tolerance_s: 0.05
+# The expected trajectory shape (waypoint count, spacing, horizon) is per model:
+# see `trajectory` in models.yaml.
 
 # Physical limits used by the validator and the controller.
 limits:
   max_speed_mps: 15.0
   max_accel_mps2: 2.0
   max_decel_mps2: 6.0
+  waypoint_time_tolerance_s: 0.05
 
 # How meta-actions become trajectories (src/controller/trajectory.py).
 controller:
+  waypoint_count: 6          # meta-actions are expanded to 6 points, 0.5 s apart (3 s)
+  waypoint_spacing_s: 0.5
   accelerate_mps2: 1.0
   slow_down_decel_mps2: 2.0
   stop_decel_mps2: 4.0

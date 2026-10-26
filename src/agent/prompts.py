@@ -27,17 +27,16 @@ def goal_bearing_degrees(observation: Observation) -> float:
     return (math.degrees(relative) + 180.0) % 360.0 - 180.0
 
 
-def output_instructions(agent_config: dict) -> str:
+def output_instructions(agent_config: dict, trajectory_spec: dict) -> str:
     """Return the instructions for the configured action format."""
     action_format = agent_config["action_format"]
     template = agent_config["prompt"]["output_instructions"][action_format]
-    return template.format(
-        count=agent_config["waypoints"]["count"],
-        spacing_s=agent_config["waypoints"]["spacing_s"],
-    )
+    return template.format(count=trajectory_spec["waypoint_count"], spacing_s=trajectory_spec["spacing_s"])
 
 
-def build_prompt(observation: Observation, history: list[Action], agent_config: dict) -> Prompt:
+def build_prompt(
+    observation: Observation, history: list[Action], agent_config: dict, trajectory_spec: dict
+) -> Prompt:
     """Fill the prompt templates for this observation and recent history."""
     goal_x, goal_y = observation.goal
     view_names = sorted(observation.camera_frames)
@@ -47,7 +46,7 @@ def build_prompt(observation: Observation, history: list[Action], agent_config: 
         distance_to_goal_m=math.hypot(goal_x - observation.ego.x, goal_y - observation.ego.y),
         goal_bearing_deg=goal_bearing_degrees(observation),
         history=describe_history(history),
-        output_instructions=output_instructions(agent_config),
+        output_instructions=output_instructions(agent_config, trajectory_spec),
     )
     return Prompt(
         system_text=agent_config["prompt"]["system"].strip(),

@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.utils.config import CONFIG_DIR, load_scenarios, load_yaml
+from src.utils.config import CONFIG_DIR, load_model_config, load_scenarios, load_yaml
 
 
 @pytest.fixture
@@ -13,3 +13,9 @@ def agent_config() -> dict:
 @pytest.fixture
 def scenarios() -> dict[str, dict]:
     return load_scenarios(CONFIG_DIR)
+
+
+@pytest.fixture
+def trajectory_spec() -> dict:
+    """The dummy model's trajectory spec: 6 points, 0.5 s apart."""
+    return load_model_config(CONFIG_DIR, "dummy", None)["trajectory"]

@@ -23,6 +23,16 @@ def parse_model_spec(model_spec: str) -> tuple[str, str | None]:
     return name, variant or None
 
 
+def check_trajectory_spec(name: str, trajectory_spec: dict) -> None:
+    """Raise ValueError if a model's trajectory spec is internally inconsistent."""
+    implied_horizon = trajectory_spec["waypoint_count"] * trajectory_spec["spacing_s"]
+    if abs(implied_horizon - trajectory_spec["horizon_s"]) > 1e-6:
+        raise ValueError(
+            f"model {name!r}: waypoint_count * spacing_s = {implied_horizon} s, "
+            f"but horizon_s is {trajectory_spec['horizon_s']} s"
+        )
+
+
 def load_model_config(config_dir: Path, name: str, variant: str | None) -> dict:
     """Return the models.yaml entry for `name`, checking the requested variant."""
     models = load_yaml(config_dir / "models.yaml")["models"]
@@ -31,6 +41,7 @@ def load_model_config(config_dir: Path, name: str, variant: str | None) -> dict:
     model_config = {"name": name, "variant": "bf16", **models[name]}
     if variant is not None and variant != model_config["variant"]:
         raise ValueError(f"model {name!r} has variant {model_config['variant']!r}, not {variant!r}")
+    check_trajectory_spec(name, model_config["trajectory"])
     return model_config
 
 

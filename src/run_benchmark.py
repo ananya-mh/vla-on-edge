@@ -86,7 +86,13 @@ def main(argv: list[str] | None = None) -> Path | None:
     for scenario in run_config["scenarios"]:
         for seed in seeds:
             episode_metrics = run_episode(
-                env, adapter, scenario, seed, run_config["agent"], run_dir / "steps.jsonl"
+                env,
+                adapter,
+                scenario,
+                seed,
+                run_config["agent"],
+                run_config["model"]["trajectory"],
+                run_dir / "steps.jsonl",
             )
             episode_record = {"scenario": scenario["name"], "seed": seed, "tags": scenario["tags"], **episode_metrics}
             append_jsonl(run_dir / "episodes.jsonl", episode_record)
