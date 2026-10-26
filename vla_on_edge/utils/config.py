@@ -59,6 +59,11 @@ def load_scenarios(config_dir: Path) -> dict[str, dict]:
     return scenarios
 
 
+def load_alpasim_scenes(config_dir: Path) -> dict:
+    """Return the `alpasim` section of scenarios.yaml (suite, smoke_scene, scenes)."""
+    return load_yaml(config_dir / "scenarios.yaml")["alpasim"]
+
+
 def apply_overrides(base: dict, overrides: dict) -> dict:
     """Return a copy of `base` with `overrides` applied, merging nested sections one level deep.
 

@@ -26,3 +26,34 @@ scenarios:
     road_width_m: 6.0
     random_obstacles: 2
     tags: [edge_case]
+
+# Real-simulator scenes (AlpaSim + NuRec). Run by scripts/run_stages.sh, one wizard
+# invocation per scene. IDs come from third_party/alpasim/data/scenes/sim_suites.csv
+# (suite public_2601, the suite AlpaSim recommends; data/scenes/README.md) and all
+# are in public_2601_video_model, i.e. they have ClipGT map inputs, so the off-road
+# and lane metrics have full maps. All use NRE 26.1.112 artifacts (HF revision 26.01).
+#
+# Difficulty: AlpaSim ships no per-scene metadata (no tags, difficulty, weather, or
+# road type), so difficult scenes cannot be identified offline. The list is two
+# known-good scenes plus a seeded random sample; after the first full run, replace
+# easy sampled scenes with hard ones found by a wider screening run (see PLAN.md).
+alpasim:
+  suite: public_2601
+  smoke_scene: clipgt-01d503d4-449b-46fc-8d78-9085e70d3554   # stages 1 and 2
+  scenes:
+    - id: clipgt-01d503d4-449b-46fc-8d78-9085e70d3554
+      reason: AlpaSim's default scene (base_config.yaml scenes.scene_ids); most likely to run cleanly, used as the smoke scene
+    - id: clipgt-02eadd92-02f1-46d8-86fe-a9e338fed0b6
+      reason: the scene AlpaSim's tutorial uses for single-scene runs (docs/TUTORIAL.md); a second known-good reference
+    - id: clipgt-235c5235-95a7-4952-bedc-ed230d244324
+      reason: seeded random sample (random.Random(2026)) from public_2601 scenes with ClipGT maps
+    - id: clipgt-28e3a9ca-66bc-4d25-a684-fefd43da3e88
+      reason: seeded random sample (random.Random(2026)) from public_2601 scenes with ClipGT maps
+    - id: clipgt-73ee2cdb-1b63-4b6a-93f6-3b73af8ede2b
+      reason: seeded random sample (random.Random(2026)) from public_2601 scenes with ClipGT maps
+    - id: clipgt-b6f09ef3-b4aa-41e2-b257-a118f7afaac2
+      reason: seeded random sample (random.Random(2026)) from public_2601 scenes with ClipGT maps
+    - id: clipgt-b988494a-2a9a-4791-8613-679c8e506007
+      reason: seeded random sample (random.Random(2026)) from public_2601 scenes with ClipGT maps
+    - id: clipgt-eda66f79-fa63-418c-97e6-14b91a0c615f
+      reason: seeded random sample (random.Random(2026)) from public_2601 scenes with ClipGT maps
