@@ -26,8 +26,14 @@ ALPASIM_COMMIT="affc2eab209fa43bdfa2f26c0f8d437922d78a68"  # the commit everythi
 MIN_DRIVER_MAJOR=570          # AlpaSim's renderer container uses CUDA 12.8 (docs/ONBOARDING.md)
 MIN_FREE_DISK_GB=200          # AlpaSim image + Alpamayo 1.5 (22 GB) + Cosmos-Reason2 + scenes + rollouts
 MIN_GPU_MEMORY_MIB=80000      # plan: Alpamayo 1.5 and the renderer on one 80 GB GPU
-MODELS=("nvidia/Alpamayo-1.5-10B" "nvidia/Cosmos-Reason2-8B")  # both gated (docs/TUTORIAL.md)
-SCENE_DATASET="nvidia/PhysicalAI-Autonomous-Vehicles-NuRec"     # gated dataset (scenes/csv_utils.py)
+# Gated status as of 2026-10-26 (Hugging Face API): Cosmos-Reason2-8B is gated;
+# Alpamayo-1.5-10B is not, though AlpaSim's docs/TUTORIAL.md says to accept its terms.
+MODELS=("nvidia/Alpamayo-1.5-10B" "nvidia/Cosmos-Reason2-8B")
+SCENE_DATASET="nvidia/PhysicalAI-Autonomous-Vehicles-NuRec"     # gated (scenes/csv_utils.py)
+# Loaded by AlpaSim's driver at startup via alpamayo1_5.helper.get_processor
+# (alpamayo1_5/helper.py BASE_PROCESSOR_NAME); public. Only its small files are needed.
+PROCESSOR_REPO="Qwen/Qwen3-VL-2B-Instruct"
+NON_WEIGHT_FILES='["*.json", "*.txt", "*.jinja", "*.model", "tokenizer*"]'
 
 REPO="$WORKDIR/vla-on-edge"
 ALPASIM="$REPO/third_party/alpasim"
@@ -146,6 +152,24 @@ from huggingface_hub import snapshot_download
 for repo_id in sys.argv[1:]:
     print(snapshot_download(repo_id))
 " "${MODELS[@]}" || fail "model download failed"
+
+  step "Downloading what the driver would otherwise fetch at startup"
+  "$ALPASIM/.venv/bin/python" - "$PROCESSOR_REPO" "$NON_WEIGHT_FILES" << 'EOF' || fail "could not cache the driver's startup files"
+import json
+import sys
+from huggingface_hub import hf_hub_download, snapshot_download
+
+processor_repo, patterns = sys.argv[1], json.loads(sys.argv[2])
+print(snapshot_download(processor_repo, allow_patterns=patterns))
+# Alpamayo 1.5 loads its base VLM's config and processor from the repo named in its
+# own config.json (alpamayo1_5/models/base_model.py, config.vlm_name_or_path).
+config = json.load(open(hf_hub_download("nvidia/Alpamayo-1.5-10B", "config.json")))
+base_vlm = config.get("vlm_name_or_path")
+print("Alpamayo 1.5 base VLM:", base_vlm)
+if base_vlm is None:
+    sys.exit("config.json has no vlm_name_or_path; check alpamayo1_5's config format")
+print(snapshot_download(base_vlm, allow_patterns=patterns))
+EOF
 }
 
 scene_ids() {
@@ -169,6 +193,10 @@ prepare_scenes_and_image() {
       wizard.run_method=NONE wizard.log_dir="$prepare_dir" "scenes.scene_ids=[$(scene_ids)]") \
     || fail "AlpaSim's wizard could not prepare the run (scene download or config error; see above)"
   "$ALPASIM/.venv/bin/python" -m alpasim_vla_on_edge.check_config "$prepare_dir" || fail "generated configs are wrong"
+
+  step "Pulling prebuilt images (NVIDIA's NuRec renderer, Prometheus)"
+  docker compose -f "$prepare_dir/docker-compose.yaml" pull --ignore-buildable \
+    || fail "image pull failed; if nvcr.io refused it, run: docker login nvcr.io (user \$oauthtoken, password: an NGC API key)"
 
   step "Building AlpaSim's Docker image (long; needs network)"
   docker compose -f "$prepare_dir/docker-compose.yaml" build || fail "docker image build failed"
