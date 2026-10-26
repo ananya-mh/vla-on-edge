@@ -5,6 +5,7 @@ Charts are written next to the report, in <output dir>/charts/.
 """
 
 import argparse
+import json
 import os
 from pathlib import Path
 
@@ -159,6 +160,22 @@ def save(figure, path: Path) -> Path:
     return path
 
 
+def gpu_monitor_section(stage_dir: Path) -> list[str]:
+    """Peak nvidia-smi memory per GPU and per container, if scripts/gpu_monitor.py ran.
+
+    This includes the renderer, unlike the plugin's PyTorch numbers.
+    """
+    peaks_path = stage_dir.parent / "gpu_memory_peaks.json"
+    if not peaks_path.exists():
+        return []
+    peaks = json.loads(peaks_path.read_text()).get(stage_dir.name, {})
+    if not peaks:
+        return []
+    lines = ["## GPU memory (nvidia-smi peaks)", "", "| GPU or container | Peak (GiB) |", "|---|---|"]
+    lines += [f"| {key} | {value / 1024:.1f} |" for key, value in sorted(peaks.items())]
+    return lines + [""]
+
+
 def build_report(stage_dir: Path, output: Path) -> Path:
     """Write the Markdown report and its charts; return the report path."""
     stage = load_stage(stage_dir)
@@ -186,6 +203,7 @@ def build_report(stage_dir: Path, output: Path) -> Path:
     ]
     for model, summary in summaries.items():
         lines += [*scenario_table(model, summary), ""]
+    lines += gpu_monitor_section(stage_dir)
     lines += ["## Charts", ""]
     lines += [f"![{path.stem}](charts/{path.name})" for path in charts]
     lines += ["", "## Worst cases", *worst_cases(stage, report_dir), ""]

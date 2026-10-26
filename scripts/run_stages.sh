@@ -102,6 +102,20 @@ recorded_seconds() {
   fi
 }
 
+# Log nvidia-smi memory (per GPU and per container) for the whole invocation; the
+# monitor writes gpu_memory_peaks.json when stopped, including on failure.
+start_gpu_monitor() {
+  mkdir -p "$RESULTS"
+  "$PYTHON" "$REPO/scripts/gpu_monitor.py" "$RESULTS" --interval-s "${GPU_MONITOR_INTERVAL_S:-5}" &
+  GPU_MONITOR_PID=$!
+  trap 'kill -TERM "$GPU_MONITOR_PID" 2> /dev/null || true; wait "$GPU_MONITOR_PID" 2> /dev/null || true' EXIT
+}
+
+set_stage() {
+  mkdir -p "$RESULTS"
+  echo "$1" > "$RESULTS/current_stage"
+}
+
 WRAPPER_OVERRIDES=("hydra.searchpath=[file://$REPO/configs/alpasim]" "+vla_on_edge=alpamayo1_5")
 
 # copy_results <log_dir> <stage> <model> <scene>
@@ -141,12 +155,14 @@ stage_report() {
 }
 
 stage_1() {
+  set_stage stage1
   run_scene stage1 alpamayo1_5_builtin "$(config_value "config['smoke_scene']")" ""
   stage_report stage1
 }
 
 stage_2() {
   local scene log_dir start=$SECONDS
+  set_stage stage2
   scene="$(config_value "config['smoke_scene']")"
   # Generate and check the wrapper's configs before spending GPU time on them.
   log_dir="$WORK/stage2_config_check"
@@ -172,6 +188,7 @@ estimate_stage_3() {
 
 stage_3() {
   local scene scenes start=$SECONDS
+  set_stage stage3
   scenes="$(config_value "' '.join(scene['id'] for scene in config['scenes'])")"
   step "Stage 3: $(wc -w <<< "$scenes" | tr -d ' ') scenes"
   estimate_stage_3 "$(wc -w <<< "$scenes" | tr -d ' ')"
@@ -185,6 +202,7 @@ stage_3() {
   echo "report: $RESULTS_ROOT/report.md"
 }
 
+start_gpu_monitor
 case "${1:-}" in
   1) stage_1 ;;
   2) stage_2 ;;
