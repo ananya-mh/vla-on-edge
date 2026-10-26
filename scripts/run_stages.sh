@@ -13,6 +13,8 @@
 # RESULTS_ROOT to write somewhere other than results/ (used by the tests).
 set -euo pipefail
 
+# setup_vm.sh may have installed uv and Rust here; a new shell might not have them on PATH.
+export PATH="$PATH:$HOME/.local/bin:$HOME/.cargo/bin"  # appended: an existing uv wins
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 ALPASIM="$REPO/third_party/alpasim"
 RUN_ID="${RUN_ID:-$(date +%Y%m%d_%H%M%S)}"
