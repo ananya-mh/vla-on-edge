@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 results/*
 !results/samples/
+third_party/
 
 CLAUDE.md
 PLAN.md
