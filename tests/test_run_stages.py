@@ -28,6 +28,8 @@ import random
 
 args = sys.argv[1:]
 real_uv = {real_uv!r}
+if args[:3] != ["run", "--no-sync", "alpasim_wizard"]:
+    os.execv(real_uv, [real_uv, *args])  # e.g. `uv build` from build_wheels.sh
 overrides = args[3:]
 if "wizard.run_method=NONE" in overrides:
     # Real wizard, generate-only, no scene download.

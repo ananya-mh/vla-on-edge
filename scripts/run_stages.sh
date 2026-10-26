@@ -27,6 +27,8 @@ fail() { echo "STAGE FAILED: $*" >&2; exit 1; }
 step() { echo; echo "==> $*"; }
 
 [[ -x "$ALPASIM/.venv/bin/python" && -x "$PYTHON" ]] || fail "run scripts/setup_vm.sh first"
+# The driver container installs these wheels; rebuild so it runs the current code.
+bash "$REPO/scripts/build_wheels.sh" > /dev/null || fail "could not build our wheels"
 
 config_value() {
   "$PYTHON" -c "

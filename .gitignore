@@ -9,3 +9,5 @@ third_party/
 
 CLAUDE.md
 PLAN.md
+dist/
+build/

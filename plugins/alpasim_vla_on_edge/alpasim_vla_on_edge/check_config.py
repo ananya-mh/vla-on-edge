@@ -45,12 +45,16 @@ def check_compose_driver_service(log_dir: Path) -> list[str]:
     driver = drivers[0]
     problems = []
     command = " ".join(driver["command"])
-    if "alpasim_vla_on_edge" not in command or "--no-deps" not in command:
-        problems.append("driver command does not install our plugin with --no-deps")
-    if not any(volume.endswith(":/mnt/vla_on_edge") for volume in driver["volumes"]):
-        problems.append("our repo is not mounted at /mnt/vla_on_edge")
-    if not any(entry.startswith(f"{LOG_DIR_VARIABLE}=/mnt/output/") for entry in driver.get("environment", [])):
+    for flag in ("--offline", "--no-deps", "/mnt/vla_on_edge/dist/wheels/"):
+        if flag not in command:
+            problems.append(f"driver command does not install our wheels with {flag}")
+    if not any(volume.endswith(":/mnt/vla_on_edge:ro") for volume in driver["volumes"]):
+        problems.append("our repo is not mounted read-only at /mnt/vla_on_edge")
+    environment = driver.get("environment", [])
+    if not any(entry.startswith(f"{LOG_DIR_VARIABLE}=/mnt/output/") for entry in environment):
         problems.append(f"{LOG_DIR_VARIABLE} is not set under /mnt/output (the mounted log dir)")
+    if "VLA_ON_EDGE_CONFIG_DIR=/mnt/vla_on_edge/configs" not in environment:
+        problems.append("VLA_ON_EDGE_CONFIG_DIR does not point at the mounted configs/")
     return problems
 
 

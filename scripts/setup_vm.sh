@@ -155,6 +155,9 @@ print(','.join(scene['id'] for scene in load_alpasim_scenes(CONFIG_DIR)['scenes'
 }
 
 prepare_scenes_and_image() {
+  step "Building our wheels (installed offline in the driver container)"
+  bash "$REPO/scripts/build_wheels.sh" || fail "could not build our wheels"
+
   step "Downloading the scenes and generating AlpaSim's configs (no simulation yet)"
   local prepare_dir="$WORKDIR/prepare"
   rm -rf "$prepare_dir"

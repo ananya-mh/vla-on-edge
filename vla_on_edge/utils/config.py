@@ -4,11 +4,14 @@ Configs stay plain dicts: they are only read, and printing or saving them as JSO
 is trivial.
 """
 
+import os
 from pathlib import Path
 
 import yaml
 
-CONFIG_DIR = Path(__file__).resolve().parents[2] / "configs"
+# The repo's configs/ folder. An installed wheel (e.g. in AlpaSim's driver
+# container) is not next to the repo, so there VLA_ON_EDGE_CONFIG_DIR points at it.
+CONFIG_DIR = Path(os.environ.get("VLA_ON_EDGE_CONFIG_DIR", Path(__file__).resolve().parents[2] / "configs"))
 
 
 def load_yaml(path: Path) -> dict:

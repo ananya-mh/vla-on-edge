@@ -7,10 +7,12 @@
 #     'hydra.searchpath=[file:///path/to/vla-on-edge/configs/alpasim]' +vla_on_edge=alpamayo1_5 \
 #     wizard.log_dir=... 'scenes.scene_ids=[...]'
 #
-# The driver runs in AlpaSim's container, so our repo is mounted into it and our
-# packages are installed (no deps; AlpaSim's image already has them) right before
-# the driver starts. Logs go to /mnt/output/vla_on_edge, which is
-# <wizard.log_dir>/vla_on_edge on the host (AlpaSim already mounts log_dir there).
+# The driver runs in AlpaSim's container, so our repo is mounted into it read-only
+# and our two packages are installed from wheels built on the host
+# (scripts/build_wheels.sh -> dist/wheels/) right before the driver starts:
+# --offline --no-deps, so no network and nothing written into the mounted repo.
+# Logs go to /mnt/output/vla_on_edge, which is <wizard.log_dir>/vla_on_edge on the
+# host (AlpaSim already mounts log_dir there).
 
 driver:
   model:
@@ -33,13 +35,14 @@ services:
       - "${repo-relative:'src'}:/repo/src"
       - "${repo-relative:'plugins'}:/repo/plugins"
       - "${defines.hf_cache}:/root/.cache/huggingface"
-      - "${oc.env:VLA_ON_EDGE_REPO}:/mnt/vla_on_edge"
+      - "${oc.env:VLA_ON_EDGE_REPO}:/mnt/vla_on_edge:ro"
     environments:
       - "VLA_ON_EDGE_LOG_DIR=/mnt/output/vla_on_edge"
+      - "VLA_ON_EDGE_CONFIG_DIR=/mnt/vla_on_edge/configs"  # the wheel is not next to configs/
     # AlpaSim joins these with spaces and runs them in a shell.
     command:
-      - "uv pip install --python /repo/.venv/bin/python --no-deps"
-      - "-e /mnt/vla_on_edge -e /mnt/vla_on_edge/plugins/alpasim_vla_on_edge &&"
+      - "uv pip install --python /repo/.venv/bin/python --offline --no-deps --reinstall"
+      - "/mnt/vla_on_edge/dist/wheels/*.whl &&"
       - "uv run -m alpasim_driver.main"
       - "--config-path=/mnt/output"
       - "--config-name=driver-config.yaml"
