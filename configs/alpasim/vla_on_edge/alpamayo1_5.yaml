@@ -1,0 +1,47 @@
+# @package _global_
+# AlpaSim (Hydra) overrides that run Alpamayo 1.5 through our logging wrapper.
+#
+# Use together with AlpaSim's own driver config, from third_party/alpasim:
+#   VLA_ON_EDGE_REPO=/path/to/vla-on-edge uv run alpasim_wizard deploy=local topology=1gpu \
+#     driver=alpamayo1_5 \
+#     'hydra.searchpath=[file:///path/to/vla-on-edge/configs/alpasim]' +vla_on_edge=alpamayo1_5 \
+#     wizard.log_dir=... 'scenes.scene_ids=[...]'
+#
+# The driver runs in AlpaSim's container, so our repo is mounted into it and our
+# packages are installed (no deps; AlpaSim's image already has them) right before
+# the driver starts. Logs go to /mnt/output/vla_on_edge, which is
+# <wizard.log_dir>/vla_on_edge on the host (AlpaSim already mounts log_dir there).
+
+driver:
+  model:
+    model_type: vla_on_edge_alpamayo1_5  # our wrapper's alpasim.models entry point
+
+runtime:
+  simulation_config:
+    # One rollout per scene: our step logs cannot tell rollouts apart, so each
+    # scene runs in its own wizard invocation with exactly one rollout.
+    n_rollouts: 1
+
+services:
+  driver:
+    # Hydra cannot append to a list, so this restates AlpaSim's driver volumes
+    # (third_party/alpasim/src/wizard/configs/base_config.yaml, services.driver)
+    # and adds our repo as the last entry.
+    volumes:
+      - "${defines.drivers}:/mnt/drivers"
+      - "${wizard.log_dir}:/mnt/output"
+      - "${repo-relative:'src'}:/repo/src"
+      - "${repo-relative:'plugins'}:/repo/plugins"
+      - "${defines.hf_cache}:/root/.cache/huggingface"
+      - "${oc.env:VLA_ON_EDGE_REPO}:/mnt/vla_on_edge"
+    environments:
+      - "VLA_ON_EDGE_LOG_DIR=/mnt/output/vla_on_edge"
+    # AlpaSim joins these with spaces and runs them in a shell.
+    command:
+      - "uv pip install --python /repo/.venv/bin/python --no-deps"
+      - "-e /mnt/vla_on_edge -e /mnt/vla_on_edge/plugins/alpasim_vla_on_edge &&"
+      - "uv run -m alpasim_driver.main"
+      - "--config-path=/mnt/output"
+      - "--config-name=driver-config.yaml"
+      - "host=0.0.0.0"
+      - "port={port}"

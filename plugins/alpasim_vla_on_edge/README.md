@@ -16,14 +16,20 @@ re-run the install after any sync.
 
 ## Use
 
-Select the wrapper as the driver model and tell it where to log:
+Our Hydra overrides live in `configs/alpasim/vla_on_edge/alpamayo1_5.yaml`. They
+switch the driver to `vla_on_edge_alpamayo1_5`, mount this repo into the driver
+container at `/mnt/vla_on_edge`, install both packages there (`--no-deps`) before
+the driver starts, and set `VLA_ON_EDGE_LOG_DIR=/mnt/output/vla_on_edge`, which is
+`<wizard.log_dir>/vla_on_edge` on the host. From `third_party/alpasim`:
 
-    driver.model.model_type: vla_on_edge_alpamayo1_5
-    VLA_ON_EDGE_LOG_DIR=/path/to/logs
+    VLA_ON_EDGE_REPO=$REPO uv run alpasim_wizard deploy=local topology=1gpu driver=alpamayo1_5 \
+      "hydra.searchpath=[file://$REPO/configs/alpasim]" +vla_on_edge=alpamayo1_5 \
+      wizard.log_dir=$LOG_DIR "scenes.scene_ids=[$SCENE]"
 
-It writes `steps.jsonl` (one record per prediction) and `metadata.json`.
-TODO: AlpaSim driver config (Hydra) for the wrapper, and mounting the log
-directory into the driver container.
+Check the generated configs without a GPU (add `wizard.run_method=NONE` or use
+`deploy=docker_build_only`), then:
+
+    .venv/bin/python -m alpasim_vla_on_edge.check_config $LOG_DIR
 
 ## Test
 
