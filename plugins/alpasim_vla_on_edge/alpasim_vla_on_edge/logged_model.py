@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 
 import numpy as np
+import torch
 from alpasim_driver.models.base import (
     BaseTrajectoryModel,
     DriveCommand,
@@ -105,6 +106,7 @@ class LoggedModel(BaseTrajectoryModel):
             "log_format_version": LOG_FORMAT_VERSION,
             "model": self.MODEL_NAME,
             "wall_time_s": time.time(),
+            "sim_time_us": simulation_time_us(prediction_input, prediction),
             "inference_seed": prediction_input.inference_seed,
             "command": prediction_input.command.name,
             "ego_speed_mps": prediction_input.speed,
@@ -116,6 +118,7 @@ class LoggedModel(BaseTrajectoryModel):
             "reasoning_text": prediction.reasoning_text,
             # With batch_size > 1 the per-prediction latency is not separable.
             "latency_s": {"batch": batch_s, "batch_size": batch_size},
+            "gpu_memory_mib": gpu_memory_mib(),
         }
 
     # Everything else is delegated to the wrapped model.
@@ -140,6 +143,32 @@ class LoggedAlpamayo15(LoggedModel):
 
     INNER_MODEL_TYPE = "alpamayo1_5"
     MODEL_NAME = "alpamayo1_5"
+
+
+def simulation_time_us(prediction_input: PredictionInput, prediction: ModelPrediction) -> int | None:
+    """Return the simulation time of this prediction, for per-rollout time series (e.g. jerk).
+
+    Prefers the model's own input time origin; otherwise the newest ego pose.
+    """
+    if prediction.model_t0_us is not None:
+        return int(prediction.model_t0_us)
+    if prediction_input.ego_pose_history:
+        return int(prediction_input.ego_pose_history[-1].timestamp_us)
+    return None
+
+
+def gpu_memory_mib() -> dict | None:
+    """Return PyTorch's peak GPU memory in this (driver) process, or None without CUDA.
+
+    This is the model's memory only: the renderer runs in a separate container.
+    """
+    if not torch.cuda.is_available():
+        return None
+    mebibyte = 2**20
+    return {
+        "peak_allocated": torch.cuda.max_memory_allocated() / mebibyte,
+        "peak_reserved": torch.cuda.max_memory_reserved() / mebibyte,
+    }
 
 
 def check_frequency_matches(model_config: dict, output_frequency_hz: int) -> None:

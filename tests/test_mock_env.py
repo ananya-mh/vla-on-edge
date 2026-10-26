@@ -8,7 +8,7 @@ from src.adapters.base import Action, EgoState, MetaAction, Waypoint
 from src.run_benchmark import main
 from src.sim.mock_env import MockEnv, advance_along_waypoints
 from src.utils import config as config_module
-from src.utils.logging import read_jsonl
+from src.utils.logging import LOG_FORMAT_VERSION, read_jsonl
 
 KEEP_LANE = Action(meta_action=MetaAction.KEEP_LANE)
 
@@ -97,7 +97,7 @@ def test_smoke_run_end_to_end(tmp_path, monkeypatch, action_format):
     # The dummy only produces valid actions, so nothing should fall back.
     assert all(step["fallback_reason"] is None for step in steps)
     assert all(step["prompt_hash"] for step in steps)
-    assert all(record["log_format_version"] == 1 for record in steps + episodes)
+    assert all(record["log_format_version"] == LOG_FORMAT_VERSION for record in steps + episodes)
 
 
 def test_fake_alpamayo_runs_end_to_end_on_the_mock(tmp_path):

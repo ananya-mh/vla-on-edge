@@ -5,7 +5,8 @@ from pathlib import Path
 
 # Version of the step and episode record layout. Bump it whenever a field is added,
 # removed, renamed, or changes meaning, so analysis code can tell old logs apart.
-LOG_FORMAT_VERSION = 1
+# 2: AlpaSim plugin records gained sim_time_us and gpu_memory_mib.
+LOG_FORMAT_VERSION = 2
 
 
 def append_jsonl(path: Path, record: dict) -> None:

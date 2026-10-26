@@ -87,7 +87,9 @@ def test_predictions_are_returned_unchanged_and_logged(tmp_path):
     records = read_records(tmp_path)
     assert len(records) == 2
     record = records[0]
-    assert record["log_format_version"] == 1
+    assert record["log_format_version"] == 2
+    assert record["sim_time_us"] is None  # the fake input has no pose history
+    assert record["gpu_memory_mib"] is None  # no CUDA in tests
     assert record["model"] == "alpamayo1_5"
     assert record["validation_violations"] == []
     assert record["reasoning_text"] == "clear road"
@@ -144,3 +146,16 @@ def test_entry_point_is_registered_with_alpasim():
     names = [entry.name for entry in entry_points(group="alpasim.models")]
     assert "vla_on_edge_alpamayo1_5" in names
     assert "alpamayo1_5" in names  # the built-in model we wrap
+
+
+def test_simulation_time_prefers_the_model_origin():
+    from types import SimpleNamespace
+
+    from alpasim_vla_on_edge.logged_model import simulation_time_us
+
+    prediction = FakeInnerDriver(speed_mps=8.0).predict(make_input())
+    with_history = make_input()
+    with_history.ego_pose_history = [SimpleNamespace(timestamp_us=100), SimpleNamespace(timestamp_us=200)]
+    assert simulation_time_us(with_history, prediction) == 200
+    prediction.model_t0_us = 250
+    assert simulation_time_us(with_history, prediction) == 250
