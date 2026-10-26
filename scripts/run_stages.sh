@@ -9,8 +9,9 @@
 # Usage: bash scripts/run_stages.sh 1|2|3|all     (after scripts/setup_vm.sh)
 # Results: results/vm_<RUN_ID>/stage<N>/<model>/<scene>/ (copied after each scene,
 # also on failure), stage reports, and results/report.md after stage 3.
-# Set RUN_ID to reuse one results folder across separate stage invocations, and
-# RESULTS_ROOT to write somewhere other than results/ (used by the tests).
+# Set RUN_ID to reuse one results folder across separate stage invocations (stage 3
+# uses stage 2's timing for its estimate), SCENE_TIMEOUT_S to change the per-scene
+# timeout (default 3600 s), and RESULTS_ROOT to write somewhere other than results/.
 set -euo pipefail
 
 # setup_vm.sh may have installed uv and Rust here; a new shell might not have them on PATH.
@@ -22,6 +23,7 @@ WORK="${WORKDIR:-$HOME/bench}/runs/$RUN_ID"   # AlpaSim writes here (large)
 RESULTS_ROOT="${RESULTS_ROOT:-$REPO/results}"
 RESULTS="$RESULTS_ROOT/vm_$RUN_ID"            # copied here after each scene
 PYTHON="$REPO/.venv/bin/python"
+SCENE_TIMEOUT_S="${SCENE_TIMEOUT_S:-3600}"
 
 fail() { echo "STAGE FAILED: $*" >&2; exit 1; }
 step() { echo; echo "==> $*"; }
@@ -51,6 +53,55 @@ run_alpasim() {
       wizard.log_dir="$log_dir" "scenes.scene_ids=[$scene]" "$@")
 }
 
+# run_with_timeout <seconds> <log_dir> <command...>
+# Runs the command in its own process group. On timeout, stops that run's containers
+# (killing only the wizard would leave them holding the GPU), then the whole group,
+# and returns 124.
+run_with_timeout() {
+  local seconds="$1" log_dir="$2"
+  shift 2
+  local marker="$log_dir.timed_out" pid watcher status=0
+  rm -f "$marker"
+  set -m  # job control: the background job gets its own process group
+  "$@" &
+  pid=$!
+  set +m
+  (
+    sleep "$seconds"
+    touch "$marker"
+    echo "TIMEOUT after ${seconds} s: stopping the run" >&2
+    if [[ -f "$log_dir/docker-compose.yaml" ]]; then
+      docker compose -f "$log_dir/docker-compose.yaml" down --timeout 30 > /dev/null 2>&1 || true
+    fi
+    kill -TERM -- "-$pid" 2> /dev/null || true
+  ) &
+  watcher=$!
+  wait "$pid" || status=$?
+  pkill -P "$watcher" 2> /dev/null || true  # its sleep
+  kill "$watcher" 2> /dev/null || true
+  wait "$watcher" 2> /dev/null || true
+  if [[ -f "$marker" ]]; then
+    rm -f "$marker"
+    return 124
+  fi
+  return "$status"
+}
+
+# record_seconds <name> <seconds>: keep stage timings for later estimates.
+record_seconds() {
+  mkdir -p "$RESULTS"
+  echo "$1=$2" >> "$RESULTS/timings.txt"
+  echo "$1: $(( $2 / 60 )) min $(( $2 % 60 )) s"
+}
+
+# recorded_seconds <name>: the last recorded value, or empty. Always succeeds, so a
+# missing value does not stop the script under set -e.
+recorded_seconds() {
+  if [[ -f "$RESULTS/timings.txt" ]]; then
+    { grep "^$1=" "$RESULTS/timings.txt" || true; } | tail -1 | cut -d= -f2
+  fi
+}
+
 WRAPPER_OVERRIDES=("hydra.searchpath=[file://$REPO/configs/alpasim]" "+vla_on_edge=alpamayo1_5")
 
 # copy_results <log_dir> <stage> <model> <scene>
@@ -67,11 +118,18 @@ run_scene() {
   local stage="$1" model="$2" scene="$3" check_flags="$4"
   shift 4
   local log_dir="$WORK/$stage/$model/$scene"
-  step "$stage: $model on $scene"
-  if ! run_alpasim "$log_dir" "$scene" "$@"; then
+  step "$stage: $model on $scene (timeout ${SCENE_TIMEOUT_S} s)"
+  local status=0 start=$SECONDS
+  mkdir -p "$(dirname "$log_dir")"
+  run_with_timeout "$SCENE_TIMEOUT_S" "$log_dir" run_alpasim "$log_dir" "$scene" "$@" || status=$?
+  if [[ "$status" -eq 124 ]]; then
+    copy_results "$log_dir" "$stage" "$model" "$scene"
+    fail "$scene timed out after ${SCENE_TIMEOUT_S} s (raise SCENE_TIMEOUT_S); logs in $RESULTS/$stage/$model/$scene"
+  elif [[ "$status" -ne 0 ]]; then
     copy_results "$log_dir" "$stage" "$model" "$scene"
     fail "AlpaSim run failed for $scene; logs in $RESULTS/$stage/$model/$scene/txt-logs"
   fi
+  record_seconds "${stage}_${scene}" $(( SECONDS - start ))
   copy_results "$log_dir" "$stage" "$model" "$scene"
   # shellcheck disable=SC2086  # check_flags is empty or one flag
   "$PYTHON" -m vla_on_edge.eval.check_run "$log_dir" $check_flags || fail "outputs for $scene are incomplete"
@@ -88,7 +146,7 @@ stage_1() {
 }
 
 stage_2() {
-  local scene log_dir
+  local scene log_dir start=$SECONDS
   scene="$(config_value "config['smoke_scene']")"
   # Generate and check the wrapper's configs before spending GPU time on them.
   log_dir="$WORK/stage2_config_check"
@@ -96,13 +154,31 @@ stage_2() {
   "$ALPASIM/.venv/bin/python" -m alpasim_vla_on_edge.check_config "$log_dir" || fail "wrapper configs are wrong"
   run_scene stage2 alpamayo1_5 "$scene" --plugin-logs "${WRAPPER_OVERRIDES[@]}"
   stage_report stage2
+  record_seconds stage2_total $(( SECONDS - start ))
+}
+
+# Print how long stage 3 should take, from stage 2's one-scene time (same RUN_ID).
+estimate_stage_3() {
+  local scene_count="$1" per_scene
+  per_scene="$(recorded_seconds stage2_total)"
+  if [[ -z "$per_scene" ]]; then
+    echo "No stage 2 timing for RUN_ID=$RUN_ID; run stage 2 with the same RUN_ID for an estimate."
+    return
+  fi
+  local total=$(( scene_count * per_scene ))
+  echo "Estimated stage 3 time: ~$(( total / 60 )) min ($scene_count scenes x ~$(( per_scene / 60 )) min each, from stage 2)."
+  echo "Per-scene timeout: ${SCENE_TIMEOUT_S} s."
 }
 
 stage_3() {
-  local scene
-  for scene in $(config_value "' '.join(scene['id'] for scene in config['scenes'])"); do
+  local scene scenes start=$SECONDS
+  scenes="$(config_value "' '.join(scene['id'] for scene in config['scenes'])")"
+  step "Stage 3: $(wc -w <<< "$scenes" | tr -d ' ') scenes"
+  estimate_stage_3 "$(wc -w <<< "$scenes" | tr -d ' ')"
+  for scene in $scenes; do
     run_scene stage3 alpamayo1_5 "$scene" --plugin-logs "${WRAPPER_OVERRIDES[@]}"
   done
+  record_seconds stage3_total $(( SECONDS - start ))
   stage_report stage3
   # Written in place (not copied) so its relative chart and video links resolve.
   stage_report stage3 "$RESULTS_ROOT/report.md"

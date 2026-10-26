@@ -39,6 +39,11 @@ if "wizard.run_method=NONE" in overrides:
 values = dict(o.split("=", 1) for o in overrides if "=" in o and not o.startswith("+"))
 log_dir = Path(values["wizard.log_dir"])
 scene = values["scenes.scene_ids"].strip("[]")
+if os.environ.get("HANG_SCENE") == scene:
+    import time
+    log_dir.mkdir(parents=True)
+    (log_dir / "stub.pid").write_text(str(os.getpid()))
+    time.sleep(600)  # killed by run_stages.sh's timeout
 if os.environ.get("FAIL_SCENE") == scene:
     (log_dir / "txt-logs").mkdir(parents=True)
     (log_dir / "txt-logs" / "runtime.log").write_text("simulated failure")
@@ -78,6 +83,7 @@ def test_all_three_stages_produce_results_and_a_report(stub_env):
     for stage in ("1", "2", "3"):
         completed = run_stage(stage, stub_env)
         assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert "Estimated stage 3 time" in completed.stdout  # from stage 2's timing
 
     assert (results / "stage1/alpamayo1_5_builtin" / smoke / "aggregate/results-summary.json").exists()
     assert not (results / "stage1/alpamayo1_5_builtin" / smoke / "vla_on_edge").exists()
@@ -85,6 +91,8 @@ def test_all_three_stages_produce_results_and_a_report(stub_env):
     scene_count = len(load_alpasim_scenes(CONFIG_DIR)["scenes"])
     assert len(list((results / "stage3/alpamayo1_5").iterdir())) == scene_count
     report = (Path(stub_env["RESULTS_ROOT"]) / "report.md").read_text()
+    timings = (results / "timings.txt").read_text()
+    assert "stage2_total=" in timings and "stage3_total=" in timings
     assert "## Worst cases" in report
     assert (results / "stage3/report.md").exists()
 
@@ -97,3 +105,25 @@ def test_a_failing_scene_stops_the_stage_and_keeps_its_logs(stub_env):
     stage_dir = Path(stub_env["RESULTS_ROOT"]) / "vm_test/stage3/alpamayo1_5"
     assert len(list(stage_dir.iterdir())) == 2  # the good first scene and the failed one
     assert (stage_dir / second_scene / "txt-logs/runtime.log").exists()
+
+
+def test_a_hanging_scene_is_stopped_by_the_timeout(stub_env):
+    import time
+
+    smoke = load_alpasim_scenes(CONFIG_DIR)["smoke_scene"]
+    start = time.monotonic()
+    completed = run_stage("1", {**stub_env, "HANG_SCENE": smoke, "SCENE_TIMEOUT_S": "3"})
+    assert time.monotonic() - start < 60
+    assert completed.returncode != 0
+    assert "timed out after 3 s" in completed.stderr
+    pid_file = Path(stub_env["WORKDIR"]) / "runs/test/stage1/alpamayo1_5_builtin" / smoke / "stub.pid"
+    hung_pid = int(pid_file.read_text())
+    time.sleep(1)
+    with pytest.raises(ProcessLookupError):  # the hung "AlpaSim" process was killed
+        os.kill(hung_pid, 0)
+
+
+def test_stage_3_without_stage_2_says_no_estimate(stub_env):
+    completed = run_stage("3", {**stub_env, "RUN_ID": "fresh"})
+    assert completed.returncode == 0, completed.stderr
+    assert "No stage 2 timing" in completed.stdout
