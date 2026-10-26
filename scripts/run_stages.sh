@@ -27,6 +27,11 @@ fail() { echo "STAGE FAILED: $*" >&2; exit 1; }
 step() { echo; echo "==> $*"; }
 
 [[ -x "$ALPASIM/.venv/bin/python" && -x "$PYTHON" ]] || fail "run scripts/setup_vm.sh first"
+# The driver container runs our code from wheels, not a checkout, so record the
+# commit here; the AlpaSim config passes these into the container for run metadata.
+VLA_ON_EDGE_GIT_COMMIT="$(git -C "$REPO" rev-parse HEAD)"
+VLA_ON_EDGE_GIT_DIRTY="$([[ -n "$(git -C "$REPO" status --porcelain)" ]] && echo true || echo false)"
+export VLA_ON_EDGE_GIT_COMMIT VLA_ON_EDGE_GIT_DIRTY
 # The driver container installs these wheels; rebuild so it runs the current code.
 bash "$REPO/scripts/build_wheels.sh" > /dev/null || fail "could not build our wheels"
 

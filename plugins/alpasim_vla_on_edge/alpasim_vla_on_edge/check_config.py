@@ -55,6 +55,9 @@ def check_compose_driver_service(log_dir: Path) -> list[str]:
         problems.append(f"{LOG_DIR_VARIABLE} is not set under /mnt/output (the mounted log dir)")
     if "VLA_ON_EDGE_CONFIG_DIR=/mnt/vla_on_edge/configs" not in environment:
         problems.append("VLA_ON_EDGE_CONFIG_DIR does not point at the mounted configs/")
+    commit = next((entry.split("=", 1)[1] for entry in environment if entry.startswith("VLA_ON_EDGE_GIT_COMMIT=")), None)
+    if commit in (None, "", "unknown"):
+        problems.append("VLA_ON_EDGE_GIT_COMMIT was not set on the host; run metadata would lack the commit")
     return problems
 
 

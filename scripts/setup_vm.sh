@@ -160,6 +160,8 @@ prepare_scenes_and_image() {
 
   step "Downloading the scenes and generating AlpaSim's configs (no simulation yet)"
   local prepare_dir="$WORKDIR/prepare"
+  VLA_ON_EDGE_GIT_COMMIT="$(git -C "$REPO" rev-parse HEAD)"
+  export VLA_ON_EDGE_GIT_COMMIT  # checked by check_config below
   rm -rf "$prepare_dir"
   (cd "$ALPASIM" && VLA_ON_EDGE_REPO="$REPO" uv run --no-sync alpasim_wizard \
       deploy=local topology=1gpu driver=alpamayo1_5 \

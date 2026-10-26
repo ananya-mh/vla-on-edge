@@ -1,6 +1,7 @@
 """Collects the metadata saved with every run, so results can be traced and reproduced."""
 
 import json
+import os
 import platform
 import subprocess
 from datetime import datetime, timezone
@@ -21,10 +22,21 @@ def run_command(command: list[str]) -> str | None:
 
 
 def git_info() -> dict:
-    """Return the current commit and whether there are uncommitted changes."""
+    """Return the current commit and whether there are uncommitted changes.
+
+    Inside AlpaSim's driver container our code runs from an installed wheel, not a
+    checkout, so the host records the commit and passes it in as
+    VLA_ON_EDGE_GIT_COMMIT / VLA_ON_EDGE_GIT_DIRTY (scripts/run_stages.sh).
+    """
+    if os.environ.get("VLA_ON_EDGE_GIT_COMMIT"):
+        return {
+            "commit": os.environ["VLA_ON_EDGE_GIT_COMMIT"],
+            "dirty": os.environ.get("VLA_ON_EDGE_GIT_DIRTY") == "true",
+            "source": "host environment",
+        }
     commit = run_command(["git", "rev-parse", "HEAD"])
     status = run_command(["git", "status", "--porcelain"])
-    return {"commit": commit, "dirty": bool(status) if status is not None else None}
+    return {"commit": commit, "dirty": bool(status) if status is not None else None, "source": "git"}
 
 
 def gpu_names() -> list[str]:
