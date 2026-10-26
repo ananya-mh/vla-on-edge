@@ -48,6 +48,8 @@ SCENE_DATASET="nvidia/PhysicalAI-Autonomous-Vehicles-NuRec"  # scenes (wizard/sc
 # setup_data_dir sets WORKDIR="$DATA_DIR/bench", REPO="$WORKDIR/vla-on-edge", and
 # ALPASIM="$REPO/third_party/alpasim".
 DATA_DIR="${DATA_DIR:-}"
+# Same Compose settings as run_stages.sh (v5.6.1 froze with its menu and ANSI output on).
+export COMPOSE_MENU=false COMPOSE_ANSI=never
 
 fail() { echo "SETUP FAILED: $*" >&2; exit 1; }
 step() { echo; echo "==> $*"; }
@@ -276,11 +278,11 @@ prepare_scenes_and_image() {
   "$ALPASIM/.venv/bin/python" -m alpasim_vla_on_edge.check_config "$prepare_dir" || fail "generated configs are wrong"
 
   step "Pulling prebuilt images (NVIDIA's NuRec renderer, Prometheus)"
-  docker compose -f "$prepare_dir/docker-compose.yaml" pull --ignore-buildable \
+  docker compose -f "$prepare_dir/docker-compose.yaml" pull --ignore-buildable < /dev/null \
     || fail "image pull failed; if nvcr.io refused it, run: docker login nvcr.io (user \$oauthtoken, password: an NGC API key)"
 
   step "Building AlpaSim's Docker image (long; needs network)"
-  docker compose -f "$prepare_dir/docker-compose.yaml" build || fail "docker image build failed"
+  docker compose -f "$prepare_dir/docker-compose.yaml" build < /dev/null || fail "docker image build failed"
 }
 
 main() {

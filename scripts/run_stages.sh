@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Runs the GPU benchmark in three stages; each stops at the first failure.
-#   1: one scene with AlpaSim's built-in alpamayo1_5 driver, unmodified (sanity baseline)
+#   1: one scene with AlpaSim's built-in alpamayo1_5 driver, unmodified (sanity baseline;
+#      only its container environment is set, to stay offline)
 #   2: the same scene through our logging wrapper, then check our logs exist and parse
 #   3: every scene in configs/scenarios.yaml (alpasim.scenes) through the wrapper,
 #      then build the report
@@ -32,6 +33,10 @@ RESULTS_ROOT="${RESULTS_ROOT:-$REPO/results}"
 RESULTS="$RESULTS_ROOT/vm_$RUN_ID"            # copied here after each scene
 PYTHON="$REPO/.venv/bin/python"
 SCENE_TIMEOUT_S="${SCENE_TIMEOUT_S:-3600}"
+# AlpaSim's wizard runs docker compose in the foreground. Compose v5.6.1 froze after
+# "Created" with its interactive menu and ANSI output on, so turn both off (and the
+# wizard gets stdin from /dev/null in run_alpasim).
+export COMPOSE_MENU=false COMPOSE_ANSI=never
 
 # The data disk may be ephemeral (wiped when the VM stops), so say how to copy results off.
 copy_off_reminder() {
@@ -54,6 +59,20 @@ step() { echo; echo "==> $*"; }
 VLA_ON_EDGE_GIT_COMMIT="$(git -C "$REPO" rev-parse HEAD)"
 VLA_ON_EDGE_GIT_DIRTY="$([[ -n "$(git -C "$REPO" status --porcelain)" ]] && echo true || echo false)"
 export VLA_ON_EDGE_GIT_COMMIT VLA_ON_EDGE_GIT_DIRTY
+# Compose's behavior differs by version (see COMPOSE_MENU above), so record it: the
+# wrapper's run metadata gets it via the container environment, and every stage
+# (including stage 1, which has no wrapper) gets it in host_versions.txt.
+VLA_ON_EDGE_COMPOSE_VERSION="$(docker compose version --short 2> /dev/null || echo unknown)"
+export VLA_ON_EDGE_COMPOSE_VERSION
+record_host_versions() {
+  mkdir -p "$RESULTS"
+  {
+    echo "invocation=$(date -u +%Y-%m-%dT%H:%M:%SZ) stage=${1:-}"
+    echo "docker_compose=$VLA_ON_EDGE_COMPOSE_VERSION"
+    echo "docker=$(docker version --format '{{.Server.Version}}' 2> /dev/null || echo unknown)"
+    echo "nvidia_driver=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2> /dev/null | head -1 || echo unknown)"
+  } >> "$RESULTS/host_versions.txt"
+}
 # The driver container installs these wheels; rebuild so it runs the current code.
 bash "$REPO/scripts/build_wheels.sh" > /dev/null || fail "could not build our wheels"
 
@@ -70,7 +89,7 @@ run_alpasim() {
   shift 2
   (cd "$ALPASIM" && VLA_ON_EDGE_REPO="$REPO" uv run --no-sync alpasim_wizard \
       deploy=local topology=1gpu driver=alpamayo1_5 \
-      wizard.log_dir="$log_dir" "scenes.scene_ids=[$scene]" "$@")
+      wizard.log_dir="$log_dir" "scenes.scene_ids=[$scene]" "$@" < /dev/null)
 }
 
 # run_with_timeout <seconds> <log_dir> <command...>
@@ -137,6 +156,19 @@ set_stage() {
 }
 
 WRAPPER_OVERRIDES=("hydra.searchpath=[file://$REPO/configs/alpasim]" "+vla_on_edge=alpamayo1_5")
+# Stage 1: AlpaSim's driver as is, only run offline against the mounted cache.
+BUILTIN_OVERRIDES=("hydra.searchpath=[file://$REPO/configs/alpasim]" "+vla_on_edge=builtin_offline")
+
+# check_configs <stage> <scene> <check_config flags> <Hydra overrides...>
+# Generates the run's configs without running and checks them before GPU time is spent.
+check_configs() {
+  local stage="$1" scene="$2" check_flags="$3"
+  shift 3
+  local log_dir="$WORK/${stage}_config_check"
+  run_alpasim "$log_dir" "$scene" "$@" wizard.run_method=NONE || fail "config generation failed"
+  # shellcheck disable=SC2086  # check_flags is empty or one flag
+  "$ALPASIM/.venv/bin/python" -m alpasim_vla_on_edge.check_config "$log_dir" $check_flags || fail "$stage configs are wrong"
+}
 
 # copy_results <log_dir> <stage> <model> <scene>
 copy_results() {
@@ -175,19 +207,19 @@ stage_report() {
 }
 
 stage_1() {
+  local scene
   set_stage stage1
-  run_scene stage1 alpamayo1_5_builtin "$(config_value "config['smoke_scene']")" ""
+  scene="$(config_value "config['smoke_scene']")"
+  check_configs stage1 "$scene" --builtin "${BUILTIN_OVERRIDES[@]}"
+  run_scene stage1 alpamayo1_5_builtin "$scene" "" "${BUILTIN_OVERRIDES[@]}"
   stage_report stage1
 }
 
 stage_2() {
-  local scene log_dir start=$SECONDS
+  local scene start=$SECONDS
   set_stage stage2
   scene="$(config_value "config['smoke_scene']")"
-  # Generate and check the wrapper's configs before spending GPU time on them.
-  log_dir="$WORK/stage2_config_check"
-  run_alpasim "$log_dir" "$scene" "${WRAPPER_OVERRIDES[@]}" wizard.run_method=NONE || fail "config generation failed"
-  "$ALPASIM/.venv/bin/python" -m alpasim_vla_on_edge.check_config "$log_dir" || fail "wrapper configs are wrong"
+  check_configs stage2 "$scene" "" "${WRAPPER_OVERRIDES[@]}"
   run_scene stage2 alpamayo1_5 "$scene" --plugin-logs "${WRAPPER_OVERRIDES[@]}"
   stage_report stage2
   record_seconds stage2_total $(( SECONDS - start ))
@@ -223,6 +255,7 @@ stage_3() {
 }
 
 start_gpu_monitor
+record_host_versions "${1:-}"
 case "${1:-}" in
   1) stage_1 && copy_off_reminder ;;
   2) stage_2 && copy_off_reminder ;;

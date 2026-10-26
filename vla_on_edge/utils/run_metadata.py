@@ -39,6 +39,16 @@ def git_info() -> dict:
     return {"commit": commit, "dirty": bool(status) if status is not None else None, "source": "git"}
 
 
+def host_tool_versions() -> dict[str, str | None]:
+    """Return versions of host tools that run the simulator, as recorded by the host.
+
+    Docker is not visible inside AlpaSim's driver container, so scripts/run_stages.sh
+    passes the Compose version in as VLA_ON_EDGE_COMPOSE_VERSION.
+    """
+    compose = os.environ.get("VLA_ON_EDGE_COMPOSE_VERSION") or run_command(["docker", "compose", "version", "--short"])
+    return {"docker_compose": compose}
+
+
 def gpu_names() -> list[str]:
     """Return the names of visible NVIDIA GPUs (empty if there are none or nvidia-smi is missing)."""
     output = run_command(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"])
@@ -71,6 +81,7 @@ def build_run_metadata(run_config: dict) -> dict:
         "gpus": gpu_names(),
         "platform": platform.platform(),
         "library_versions": library_versions(),
+        "host_tool_versions": host_tool_versions(),
         "resolved_config": run_config,
     }
 

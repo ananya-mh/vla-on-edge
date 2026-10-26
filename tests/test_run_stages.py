@@ -6,6 +6,7 @@ for `wizard.run_method=NONE`, so stage 2's config check sees real configs.
 Needs the local AlpaSim clone with its environment set up.
 """
 
+import json
 import os
 import shutil
 import subprocess
@@ -49,6 +50,15 @@ if os.environ.get("FAIL_SCENE") == scene:
     (log_dir / "txt-logs" / "runtime.log").write_text("simulated failure")
     sys.exit(3)
 write_alpasim_outputs(log_dir, scene, STORIES[1])
+# What this "AlpaSim" call was given, for the tests to check.
+import json
+devnull = os.stat("/dev/null")
+stdin = os.fstat(0)
+(log_dir / "stub_call.json").write_text(json.dumps({{
+    "overrides": overrides,
+    "compose_env": [os.environ.get("COMPOSE_MENU"), os.environ.get("COMPOSE_ANSI")],
+    "stdin_is_dev_null": (stdin.st_dev, stdin.st_ino) == (devnull.st_dev, devnull.st_ino),
+}}))
 if "+vla_on_edge=alpamayo1_5" in overrides:
     write_plugin_logs(log_dir, STORIES[1], random.Random(0))
 '''
@@ -87,6 +97,11 @@ def test_all_three_stages_produce_results_and_a_report(stub_env):
     assert "Estimated stage 3 time" in completed.stdout  # from stage 2's timing
 
     assert (results / "stage1/alpamayo1_5_builtin" / smoke / "aggregate/results-summary.json").exists()
+    stage1_call = json.loads((results / "stage1/alpamayo1_5_builtin" / smoke / "stub_call.json").read_text())
+    assert "+vla_on_edge=builtin_offline" in stage1_call["overrides"]  # offline, not the wrapper
+    assert "+vla_on_edge=alpamayo1_5" not in stage1_call["overrides"]
+    assert stage1_call["compose_env"] == ["false", "never"] and stage1_call["stdin_is_dev_null"]
+    assert "docker_compose=" in (results / "host_versions.txt").read_text()
     assert not (results / "stage1/alpamayo1_5_builtin" / smoke / "vla_on_edge").exists()
     assert (results / "stage2/alpamayo1_5" / smoke / "vla_on_edge/steps.jsonl").exists()
     scene_count = len(load_alpasim_scenes(CONFIG_DIR)["scenes"])

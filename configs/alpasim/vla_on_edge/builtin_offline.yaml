@@ -1,0 +1,21 @@
+# @package _global_
+# AlpaSim (Hydra) overrides for stage 1: AlpaSim's built-in alpamayo1_5 driver,
+# unmodified, but kept off the network like our wrapper's run (alpamayo1_5.yaml).
+#
+# Use with AlpaSim's own driver config, from third_party/alpasim:
+#   uv run alpasim_wizard deploy=local topology=1gpu driver=alpamayo1_5 \
+#     'hydra.searchpath=[file:///path/to/vla-on-edge/configs/alpasim]' +vla_on_edge=builtin_offline \
+#     wizard.log_dir=... 'scenes.scene_ids=[...]'
+#
+# Why: the container has no Hugging Face token, and Transformers asks for optional
+# files that may not exist (processor_config.json is absent from the gated
+# nvidia/Cosmos-Reason2-8B). Online, the gated repo answers 401 instead of 404 and
+# the driver crashes; offline, the missing file is skipped. AlpaSim already mounts
+# the host cache (defines.hf_cache, i.e. $HF_HOME) at /root/.cache/huggingface,
+# which scripts/prepare_hf_cache.py filled and checked.
+
+services:
+  driver:
+    # AlpaSim's base driver service sets no environment, so nothing is replaced.
+    environments:
+      - "HF_HUB_OFFLINE=1"

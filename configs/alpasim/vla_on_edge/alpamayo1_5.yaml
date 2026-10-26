@@ -45,6 +45,7 @@ services:
       # Recorded on the host by scripts/run_stages.sh for run metadata.
       - "VLA_ON_EDGE_GIT_COMMIT=${oc.env:VLA_ON_EDGE_GIT_COMMIT,unknown}"
       - "VLA_ON_EDGE_GIT_DIRTY=${oc.env:VLA_ON_EDGE_GIT_DIRTY,unknown}"
+      - "VLA_ON_EDGE_COMPOSE_VERSION=${oc.env:VLA_ON_EDGE_COMPOSE_VERSION,unknown}"
     # AlpaSim joins these with spaces and runs them in a shell.
     command:
       - "uv pip install --python /repo/.venv/bin/python --offline --no-deps --reinstall"
