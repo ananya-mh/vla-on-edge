@@ -16,6 +16,12 @@ What is needed and why (traced in third_party/alpasim at affc2eab and its venv):
   Qwen3VLConfig.from_pretrained) and its processor (:258-266); the weights then come
   from the checkpoint above. Its own weights are loaded only by
   from_pretrained_submodules (:413-421), which nothing in AlpaSim or alpamayo1_5 calls.
+- Qwen/Qwen3-VL-8B-Instruct, config and processor files only, although Alpamayo 1.5
+  does not use it: it is the default `vlm_name_or_path` (base_model.py:211), and
+  loading the config builds a default-constructed copy, whose __init__ loads that
+  processor. Transformers logs `f"Model config {config}"` (configuration_utils.py:839,
+  formatted even when info logging is off), so __repr__ -> to_json_string ->
+  to_diff_dict runs `self.__class__()` (:893). Found with trace_hub_calls below.
 - Qwen/Qwen3-VL-2B-Instruct, processor files only. The driver calls
   helper.get_processor (alpamayo1_5_model.py:91), i.e.
   AutoProcessor.from_pretrained(BASE_PROCESSOR_NAME) (alpamayo1_5/helper.py:25, 197).
@@ -33,12 +39,14 @@ import json
 import os
 import subprocess
 import sys
+import traceback
 
 from huggingface_hub import hf_hub_download, snapshot_download
 
 CHECKPOINT = "nvidia/Alpamayo-1.5-10B"
 EXPECTED_BASE_VLM = "nvidia/Cosmos-Reason2-8B"
 PROCESSOR_REPO = "Qwen/Qwen3-VL-2B-Instruct"
+CONFIG_DEFAULT_VLM = "Qwen/Qwen3-VL-8B-Instruct"  # base_model.py:211; see the docstring
 # Configs, tokenizer, processor, chat template; no *.safetensors weights.
 NON_WEIGHT_PATTERNS = ["*.json", "*.txt", "*.jinja", "*.model", "tokenizer*"]
 
@@ -62,7 +70,7 @@ def download() -> str:
     base_vlm = read_base_vlm(hf_hub_download(CHECKPOINT, "config.json"))
     print("vlm_name_or_path:", base_vlm)
     check_base_vlm(base_vlm)
-    for repo_id in (base_vlm, PROCESSOR_REPO):
+    for repo_id in (base_vlm, CONFIG_DEFAULT_VLM, PROCESSOR_REPO):
         print(f"{repo_id} (no weights):", snapshot_download(repo_id, allow_patterns=NON_WEIGHT_PATTERNS))
     return base_vlm
 
@@ -77,12 +85,41 @@ def container_like_env() -> dict[str, str]:
     return env
 
 
+def call_site(depth: int = 6) -> str:
+    """The calling frames, innermost last, as `folder/file.py:line function`."""
+    frames = traceback.extract_stack()[:-3][-depth:]  # drop call_site and the tracing wrapper
+    return " <- ".join(f"{'/'.join(frame.filename.split('/')[-2:])}:{frame.lineno} {frame.name}"
+                       for frame in reversed(frames))
+
+
+def trace_hub_calls() -> None:
+    """Print the repo id and kwargs of every config, processor, and file lookup.
+
+    Every file Transformers looks up goes through transformers.utils.hub.cached_files
+    (cached_file and the shard loader call it by module global), so wrapping it, plus
+    AutoConfig and AutoProcessor, shows everything the driver would read from the cache.
+    """
+    from transformers import AutoConfig, AutoProcessor
+    from transformers.utils import hub
+
+    def traced(name, function):
+        def wrapper(*args, **kwargs):
+            print(f"[hub] {name} args={args!r} kwargs={kwargs!r}\n      from {call_site()}", flush=True)
+            return function(*args, **kwargs)
+        return wrapper
+
+    AutoConfig.from_pretrained = traced("AutoConfig.from_pretrained", AutoConfig.from_pretrained)
+    AutoProcessor.from_pretrained = traced("AutoProcessor.from_pretrained", AutoProcessor.from_pretrained)
+    hub.cached_files = traced("cached_files", hub.cached_files)
+
+
 def load_like_the_driver() -> None:
     """Make the driver's Hugging Face calls (alpamayo1_5_model.py:86-91), on the CPU."""
     import torch
     from alpamayo1_5 import helper
     from alpamayo1_5.models.alpamayo1_5 import Alpamayo1_5
 
+    trace_hub_calls()
     model = Alpamayo1_5.from_pretrained(CHECKPOINT, dtype=torch.bfloat16, attn_implementation="sdpa")
     helper.get_processor(model.tokenizer)
 

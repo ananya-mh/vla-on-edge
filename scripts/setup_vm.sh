@@ -40,9 +40,10 @@ MIN_GPU_MEMORY_MIB=80000      # plan: Alpamayo 1.5 and the renderer on one 80 GB
 # Hugging Face repos the run needs; scripts/prepare_hf_cache.py says what each is for
 # and downloads only what is used. Gated status per the Hugging Face API on
 # 2026-10-26: Cosmos-Reason2-8B and the NuRec dataset are gated (accept the terms on
-# their pages); Alpamayo-1.5-10B and Qwen3-VL-2B-Instruct are not, although AlpaSim's
+# their pages); Alpamayo-1.5-10B and the Qwen3-VL repos are not, although AlpaSim's
 # docs/TUTORIAL.md says to accept Alpamayo 1.5's terms.
-MODEL_REPOS=("nvidia/Alpamayo-1.5-10B" "nvidia/Cosmos-Reason2-8B" "Qwen/Qwen3-VL-2B-Instruct")
+MODEL_REPOS=("nvidia/Alpamayo-1.5-10B" "nvidia/Cosmos-Reason2-8B" "Qwen/Qwen3-VL-8B-Instruct"
+             "Qwen/Qwen3-VL-2B-Instruct")
 SCENE_DATASET="nvidia/PhysicalAI-Autonomous-Vehicles-NuRec"  # scenes (wizard/scenes/csv_utils.py)
 
 # setup_data_dir sets WORKDIR="$DATA_DIR/bench", REPO="$WORKDIR/vla-on-edge", and
