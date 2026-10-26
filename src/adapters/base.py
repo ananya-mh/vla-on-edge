@@ -112,15 +112,18 @@ class Prompt:
 
 @dataclass
 class Decision:
-    """One model call: the raw text plus token counts and timing.
+    """One model call: the raw output plus token counts and timing.
 
-    The action itself is produced by the agent loop's parser, not by the adapter,
-    so that every model's output is parsed by exactly the same code.
+    Text models leave `native_trajectory` empty: the agent loop parses `raw_output`,
+    so every text model's output is parsed by exactly the same code. Models that
+    output a trajectory directly (e.g. Alpamayo) put it in `native_trajectory`
+    unchanged, and `raw_output` holds any text they produce (e.g. reasoning).
     """
 
     raw_output: str
     truncated: bool  # the model hit max_tokens before finishing
     total_s: float
+    native_trajectory: list[Waypoint] | None = None
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     ttft_s: float | None = None  # time to first token (prefill)

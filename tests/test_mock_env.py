@@ -100,6 +100,18 @@ def test_smoke_run_end_to_end(tmp_path, monkeypatch, action_format):
     assert all(record["log_format_version"] == 1 for record in steps + episodes)
 
 
+def test_fake_alpamayo_runs_end_to_end_on_the_mock(tmp_path):
+    """Plumbing only: a fixed 64-point native trajectory is validated (flag-only) and logged in full."""
+    run_dir = main(["--model", "fake_alpamayo1_5", "--experiment", "smoke_test", "--results-dir", str(tmp_path)])
+    steps = read_jsonl(run_dir / "steps.jsonl")
+    assert all(step["fallback_reason"] is None for step in steps)
+    assert all(step["validation_violations"] == [] for step in steps)
+    first = steps[0]["executed_action"]["waypoints"]
+    assert len(first) == 64
+    assert first[-1]["t"] == pytest.approx(6.4)
+    assert first[0]["rotation"] == [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+
+
 def test_alpasim_plugin_models_are_rejected_by_run_benchmark(tmp_path):
     with pytest.raises(ValueError, match="runs inside AlpaSim"):
         main(["--model", "alpamayo1_5", "--experiment", "smoke_test", "--results-dir", str(tmp_path)])

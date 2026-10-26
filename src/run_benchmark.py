@@ -16,6 +16,7 @@ from pathlib import Path
 
 from src.adapters.base import ModelAdapter
 from src.adapters.dummy_adapter import DummyAdapter
+from src.adapters.fake_alpamayo_adapter import FakeAlpamayoAdapter
 from src.agent.loop import run_episode
 from src.sim.base import SimEnv
 from src.sim.mock_env import MockEnv
@@ -25,7 +26,7 @@ from src.utils.logging import LOG_FORMAT_VERSION, append_jsonl
 from src.utils.run_metadata import build_run_metadata, save_run_metadata
 
 # Maps the `adapter` field in models.yaml to an adapter class.
-ADAPTERS = {"dummy": DummyAdapter}
+ADAPTERS = {"dummy": DummyAdapter, "fake_alpamayo": FakeAlpamayoAdapter}
 
 DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[1] / "results" / "runs"
 
@@ -36,7 +37,7 @@ def create_adapter(model_config: dict, agent_config: dict) -> ModelAdapter:
     if adapter_name == "alpasim_plugin":
         raise ValueError(
             f"model {model_config['name']!r} runs inside AlpaSim through plugins/alpasim_vla_on_edge, "
-            "not through run_benchmark"
+            "not through run_benchmark; use fake_alpamayo1_5 to test plumbing on the mock"
         )
     if adapter_name not in ADAPTERS:
         raise ValueError(f"unknown adapter {adapter_name!r}; known adapters: {sorted(ADAPTERS)}")

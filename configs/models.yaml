@@ -40,3 +40,13 @@ models:
       spacing_s: 0.1
       horizon_s: 6.4
 
+  fake_alpamayo1_5:
+    adapter: fake_alpamayo          # mock-env plumbing test only; not Alpamayo's driving quality
+    variant: bf16
+    reasoning: false
+    validation_mode: flag_only      # same as alpamayo1_5
+    fixed_speed_mps: 8.0            # matches the mock's initial speed, so the trajectory is valid
+    trajectory:                     # same shape as alpamayo1_5
+      waypoint_count: 64
+      spacing_s: 0.1
+      horizon_s: 6.4

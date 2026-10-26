@@ -39,8 +39,15 @@ def call_adapter(adapter: ModelAdapter, prompt: Prompt, timeout_s: float) -> tup
     return decision, None
 
 
+def action_from_decision(decision: Decision, agent_config: dict) -> Action:
+    """Return the decision's native trajectory as-is, or parse its text (may raise ParseError)."""
+    if decision.native_trajectory is not None:
+        return Action(waypoints=list(decision.native_trajectory))
+    return parse_action(decision.raw_output, agent_config["action_format"])
+
+
 def parse_and_validate(
-    raw_output: str, observation: Observation, agent_config: dict, model_config: dict
+    decision: Decision, observation: Observation, agent_config: dict, model_config: dict
 ) -> tuple[Action | None, list[str], str | None, str | None]:
     """Return (parsed_action, violations, fallback_reason, fallback_detail).
 
@@ -49,7 +56,7 @@ def parse_and_validate(
     mode, violations are returned but never cause a fallback.
     """
     try:
-        action = parse_action(raw_output, agent_config["action_format"])
+        action = action_from_decision(decision, agent_config)
     except ParseError as error:
         return None, [], "parse_error", str(error)
     violations = find_violations(
@@ -87,7 +94,7 @@ def run_step(
         fallback_reason, fallback_detail = "timeout", timeout_detail
     else:
         parsed_action, violations, fallback_reason, fallback_detail = parse_and_validate(
-            decision.raw_output, observation, agent_config, model_config
+            decision, observation, agent_config, model_config
         )
     parse_validate_s = time.perf_counter() - parse_start
 
@@ -102,7 +109,7 @@ def run_step(
         "timestamp_s": observation.timestamp_s,
         "prompt_hash": current_prompt_hash,
         "raw_output": decision.raw_output if decision else None,
-        # The model's full native trajectory, exactly as output (never resampled).
+        # The model's full native trajectory (with pose, if any), exactly as output.
         "parsed_action": parsed_action.to_dict() if parsed_action else None,
         "executed_action": executed_action.to_dict(),
         "validation_violations": violations,
