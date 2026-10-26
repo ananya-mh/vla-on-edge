@@ -1,0 +1,16 @@
+# Makes this repo's `src` package installable, so the AlpaSim plugin
+# (plugins/alpasim_vla_on_edge) can import our validator and logger.
+# Install it editable: configs are read from this checkout's configs/ folder.
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vla-on-edge"
+version = "0.1.0"
+description = "Driving-model benchmark harness (validator, logging, configs)"
+requires-python = ">=3.11"
+dependencies = ["numpy", "PyYAML"]
+
+[tool.setuptools.packages.find]
+include = ["src*"]

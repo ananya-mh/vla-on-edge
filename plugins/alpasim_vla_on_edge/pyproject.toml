@@ -1,0 +1,28 @@
+# AlpaSim plugin: wraps AlpaSim's built-in driver models and logs every prediction
+# with our validator (flag-only) and JSONL logger. Installed into AlpaSim's own
+# environment (Python 3.12) as a path dependency; see this folder's README.md.
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "alpasim_vla_on_edge"
+version = "0.1.0"
+description = "Logging wrapper around AlpaSim's built-in Alpamayo drivers"
+requires-python = ">=3.11"
+dependencies = [
+    "vla-on-edge",       # this repo's src package (validator, logger, configs)
+    "alpasim_driver",    # provided by AlpaSim's environment
+    "alpasim_plugins",   # provided by AlpaSim's environment
+    "numpy",
+]
+
+# `driver.model.model_type: vla_on_edge_alpamayo1_5` selects the wrapper.
+[project.entry-points."alpasim.models"]
+vla_on_edge_alpamayo1_5 = "alpasim_vla_on_edge.logged_model:LoggedAlpamayo15"
+
+[tool.setuptools.packages.find]
+include = ["alpasim_vla_on_edge*"]
+
+[tool.uv.sources]
+vla-on-edge = { path = "../..", editable = true }
