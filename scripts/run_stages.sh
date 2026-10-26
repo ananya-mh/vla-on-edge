@@ -12,11 +12,19 @@
 # Set RUN_ID to reuse one results folder across separate stage invocations (stage 3
 # uses stage 2's timing for its estimate), SCENE_TIMEOUT_S to change the per-scene
 # timeout (default 3600 s), and RESULTS_ROOT to write somewhere other than results/.
+# AlpaSim's run directories go to $WORKDIR/runs; on a VM set up by setup_vm.sh,
+# WORKDIR and HF_HOME come from its vm.env (on the data disk, next to this repo).
 set -euo pipefail
 
 # setup_vm.sh may have installed uv and Rust here; a new shell might not have them on PATH.
 export PATH="$PATH:$HOME/.local/bin:$HOME/.cargo/bin"  # appended: an existing uv wins
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
+# setup_vm.sh records where it put things (DATA_DIR, WORKDIR, HF_HOME, UV_CACHE_DIR);
+# HF_HOME matters here because AlpaSim's wizard mounts it into the driver container.
+if [[ -f "$REPO/../vm.env" ]]; then
+  # shellcheck disable=SC1091
+  source "$REPO/../vm.env"
+fi
 ALPASIM="$REPO/third_party/alpasim"
 RUN_ID="${RUN_ID:-$(date +%Y%m%d_%H%M%S)}"
 WORK="${WORKDIR:-$HOME/bench}/runs/$RUN_ID"   # AlpaSim writes here (large)
@@ -25,7 +33,19 @@ RESULTS="$RESULTS_ROOT/vm_$RUN_ID"            # copied here after each scene
 PYTHON="$REPO/.venv/bin/python"
 SCENE_TIMEOUT_S="${SCENE_TIMEOUT_S:-3600}"
 
-fail() { echo "STAGE FAILED: $*" >&2; exit 1; }
+# The data disk may be ephemeral (wiped when the VM stops), so say how to copy results off.
+copy_off_reminder() {
+  [[ -d "$RESULTS" ]] || return 0
+  local host
+  host="$(hostname -I 2> /dev/null | awk '{print $1}' || true)"  # Linux only; never fail here
+  echo
+  echo "REMINDER: copy the results off this VM before stopping it (an ephemeral disk is wiped). From your machine:"
+  echo "  rsync -avz --progress $(whoami)@${host:-<vm-ip>}:$RESULTS/ ./results/vm_$RUN_ID/"
+  echo "  (or: scp -r $(whoami)@${host:-<vm-ip>}:$RESULTS ./results/)"
+  echo "  Use the VM's public IP if the address above is a private one."
+}
+
+fail() { echo "STAGE FAILED: $*" >&2; copy_off_reminder; exit 1; }
 step() { echo; echo "==> $*"; }
 
 [[ -x "$ALPASIM/.venv/bin/python" && -x "$PYTHON" ]] || fail "run scripts/setup_vm.sh first"
@@ -204,10 +224,10 @@ stage_3() {
 
 start_gpu_monitor
 case "${1:-}" in
-  1) stage_1 ;;
-  2) stage_2 ;;
-  3) stage_3 ;;
-  all) stage_1 && stage_2 && stage_3 ;;
+  1) stage_1 && copy_off_reminder ;;
+  2) stage_2 && copy_off_reminder ;;
+  3) stage_3 && copy_off_reminder ;;
+  all) stage_1 && copy_off_reminder && stage_2 && copy_off_reminder && stage_3 && copy_off_reminder ;;
   *) fail "usage: $0 1|2|3|all" ;;
 esac
 echo "DONE: stage ${1} (results in $RESULTS)"

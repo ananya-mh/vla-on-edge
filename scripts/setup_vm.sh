@@ -2,12 +2,20 @@
 # One-time setup of a fresh cloud GPU VM, so that scripts/run_stages.sh only executes.
 #
 # Needs: a VM (not a container-based GPU pod) with Docker (compose + buildx plugins,
-# usable without sudo), the NVIDIA driver, and the NVIDIA Container Toolkit.
+# usable without sudo), the NVIDIA driver, and the NVIDIA Container Toolkit. Moving
+# Docker's data-root (once) needs passwordless sudo.
+#
+# Everything large lives under DATA_DIR: Docker's images and build cache, the
+# Hugging Face and uv caches, our repo and AlpaSim (whose data/ holds the scenes),
+# AlpaSim's run directories, and our results. On Hyperstack that is the ephemeral
+# disk, which is wiped when the VM stops: copy results off first, and rerun this
+# script after a restart.
 #
 # Usage:
 #   HF_TOKEN=hf_... bash setup_vm.sh            # e.g. curl the file onto the VM first
 # Options (environment variables):
-#   WORKDIR   where to put everything            (default: $HOME/bench)
+#   DATA_DIR  large disk for everything above    (default: the ephemeral mount, e.g.
+#             /ephemeral; else $HOME/vla_data if / has MIN_FREE_DISK_GB free)
 #   REPO_URL  our repo                           (default: GitHub origin below)
 #   REPO_REF  branch, tag, or commit to check out (default: main)
 #
@@ -15,17 +23,19 @@
 # the pinned commit -> set up AlpaSim's environment -> install our plugin (--no-deps)
 # -> set up our report environment -> check Hugging Face access -> download
 # the model files (offline-checked) -> download the scenes, pull and build images ->
-# check configs.
+# check configs. Before all that: pick DATA_DIR and move Docker's data-root there.
 # Every step fails fast with a message saying what to fix.
 set -euo pipefail
 
-WORKDIR="${WORKDIR:-$HOME/bench}"
 REPO_URL="${REPO_URL:-https://github.com/ananya-mh/vla-on-edge.git}"
 REPO_REF="${REPO_REF:-main}"
 ALPASIM_URL="https://github.com/NVlabs/alpasim.git"
 ALPASIM_COMMIT="affc2eab209fa43bdfa2f26c0f8d437922d78a68"  # the commit everything was built against
 MIN_DRIVER_MAJOR=570          # AlpaSim's renderer container uses CUDA 12.8 (docs/ONBOARDING.md)
 MIN_FREE_DISK_GB=200          # AlpaSim + renderer images, Alpamayo 1.5 (22 GB), scenes, rollouts
+# Where VM providers mount a local scratch disk (Hyperstack: /ephemeral, per
+# docs.hyperstack.cloud/docs/storage/ephemeral).
+EPHEMERAL_MOUNTS=(/ephemeral /mnt/ephemeral)
 MIN_GPU_MEMORY_MIB=80000      # plan: Alpamayo 1.5 and the renderer on one 80 GB GPU
 # Hugging Face repos the run needs; scripts/prepare_hf_cache.py says what each is for
 # and downloads only what is used. Gated status per the Hugging Face API on
@@ -35,8 +45,9 @@ MIN_GPU_MEMORY_MIB=80000      # plan: Alpamayo 1.5 and the renderer on one 80 GB
 MODEL_REPOS=("nvidia/Alpamayo-1.5-10B" "nvidia/Cosmos-Reason2-8B" "Qwen/Qwen3-VL-2B-Instruct")
 SCENE_DATASET="nvidia/PhysicalAI-Autonomous-Vehicles-NuRec"  # scenes (wizard/scenes/csv_utils.py)
 
-REPO="$WORKDIR/vla-on-edge"
-ALPASIM="$REPO/third_party/alpasim"
+# setup_data_dir sets WORKDIR="$DATA_DIR/bench", REPO="$WORKDIR/vla-on-edge", and
+# ALPASIM="$REPO/third_party/alpasim".
+DATA_DIR="${DATA_DIR:-}"
 
 fail() { echo "SETUP FAILED: $*" >&2; exit 1; }
 step() { echo; echo "==> $*"; }
@@ -50,20 +61,110 @@ check_prerequisites() {
   docker compose version > /dev/null 2>&1 || fail "the docker compose plugin is missing"
   docker buildx version > /dev/null 2>&1 || fail "the docker buildx plugin is missing"
 
-  local driver_major gpu_memory free_gb
+  local driver_major gpu_memory
   driver_major="$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -1 | cut -d. -f1)"
   [[ "$driver_major" -ge "$MIN_DRIVER_MAJOR" ]] || fail "NVIDIA driver $driver_major < $MIN_DRIVER_MAJOR (needed for CUDA 12.8)"
   gpu_memory="$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -1)"
   [[ "$gpu_memory" -ge "$MIN_GPU_MEMORY_MIB" ]] || echo "WARNING: GPU 0 has ${gpu_memory} MiB; the plan assumes 80 GB"
+  [[ -n "${HF_TOKEN:-}" ]] || fail "HF_TOKEN is not set (create one at https://huggingface.co/settings/tokens)"
+  echo "OK: driver $driver_major, GPU ${gpu_memory} MiB"
+}
+
+free_gb() {
+  df -BG --output=avail "$1" | tail -1 | tr -dc '0-9'
+}
+
+# Print the first mounted ephemeral disk, or nothing.
+detect_ephemeral_mount() {
+  local mount
+  for mount in "${EPHEMERAL_MOUNTS[@]}"; do
+    if mountpoint -q "$mount" 2> /dev/null; then
+      echo "$mount"
+      return
+    fi
+  done
+}
+
+# Pick DATA_DIR, make it ours, check its free space, and write $WORKDIR/vm.env so
+# run_stages.sh uses the same locations.
+setup_data_dir() {
+  step "Choosing the data disk"
+  if [[ -z "$DATA_DIR" ]]; then
+    DATA_DIR="$(detect_ephemeral_mount)"
+  fi
+  if [[ -z "$DATA_DIR" ]]; then
+    [[ "$(free_gb /)" -ge "$MIN_FREE_DISK_GB" ]] || fail "no ephemeral disk mounted at ${EPHEMERAL_MOUNTS[*]} \
+and only $(free_gb /) GB free on /; need ${MIN_FREE_DISK_GB} GB. Set DATA_DIR=/path/on/a/large/disk"
+    DATA_DIR="$HOME/vla_data"
+    echo "No ephemeral disk found; / has room, so using $DATA_DIR"
+  fi
+  if ! mkdir -p "$DATA_DIR" 2> /dev/null || [[ ! -w "$DATA_DIR" ]]; then
+    # Ephemeral mounts are usually owned by root.
+    { sudo -n mkdir -p "$DATA_DIR" && sudo -n chown "$(id -u):$(id -g)" "$DATA_DIR"; } \
+      || fail "cannot write to $DATA_DIR; run: sudo chown \$USER $DATA_DIR"
+  fi
+  local free
+  free="$(free_gb "$DATA_DIR")"
+  [[ "$free" -ge "$MIN_FREE_DISK_GB" ]] || fail "only ${free} GB free in $DATA_DIR; need ${MIN_FREE_DISK_GB} GB"
+
+  WORKDIR="$DATA_DIR/bench"
+  REPO="$WORKDIR/vla-on-edge"
+  ALPASIM="$REPO/third_party/alpasim"
+  # HF_HOME is read by huggingface_hub, AlpaSim's setup script, and its wizard (which
+  # mounts it into the driver container); UV_CACHE_DIR holds the torch wheels.
+  export HF_HOME="$DATA_DIR/huggingface" UV_CACHE_DIR="$DATA_DIR/uv-cache"
+  mkdir -p "$WORKDIR" "$HF_HOME" "$UV_CACHE_DIR"
+  # Values already in the environment win, so tests and one-off overrides still work.
+  cat > "$WORKDIR/vm.env" << ENV
+# Written by scripts/setup_vm.sh; sourced by scripts/run_stages.sh.
+export DATA_DIR="\${DATA_DIR:-$DATA_DIR}"
+export WORKDIR="\${WORKDIR:-$WORKDIR}"
+export HF_HOME="\${HF_HOME:-$HF_HOME}"
+export UV_CACHE_DIR="\${UV_CACHE_DIR:-$UV_CACHE_DIR}"
+ENV
+  echo "OK: DATA_DIR=$DATA_DIR (${free} GB free)"
+}
+
+# Docker keeps images and build cache in its data-root (default /var/lib/docker, on
+# the small root disk), so point it at DATA_DIR. Existing images are not moved.
+move_docker_data_root() {
+  step "Putting Docker's data-root on the data disk"
+  local target="$DATA_DIR/docker"
+  if [[ "$(docker info --format '{{.DockerRootDir}}')" == "$target" ]]; then
+    echo "OK: already $target"
+    return
+  fi
+  sudo -n true 2> /dev/null || fail "moving Docker's data-root to $target needs passwordless sudo; \
+or set \"data-root\": \"$target\" in /etc/docker/daemon.json yourself and restart Docker"
+  sudo mkdir -p "$target"
+  # Merge into daemon.json: the NVIDIA Container Toolkit keeps its runtime there.
+  # The containerd image store (Docker 29's default for new installs) keeps images
+  # under /var/lib/containerd instead of data-root, so turn it off.
+  sudo python3 - "$target" << 'EOF' || fail "could not update /etc/docker/daemon.json"
+import json
+import os
+import sys
+
+path = "/etc/docker/daemon.json"
+config = {}
+if os.path.exists(path) and os.path.getsize(path) > 0:
+    with open(path) as file:
+        config = json.load(file)
+config["data-root"] = sys.argv[1]
+config.setdefault("features", {})["containerd-snapshotter"] = False
+with open(path, "w") as file:
+    json.dump(config, file, indent=2)
+EOF
+  sudo systemctl restart docker || fail "Docker did not restart; check: sudo journalctl -u docker"
+  [[ "$(docker info --format '{{.DockerRootDir}}')" == "$target" ]] || fail "Docker's data-root is still not $target"
+  echo "OK: Docker data-root $target, storage driver $(docker info --format '{{.Driver}}')"
+}
+
+check_container_gpu() {
+  step "Checking that containers can see the GPU"
   docker run --rm --gpus all ubuntu:22.04 nvidia-smi > /dev/null 2>&1 \
     || fail "containers cannot see the GPU: install/configure the NVIDIA Container Toolkit"
-
-  mkdir -p "$WORKDIR"
-  free_gb="$(df -BG --output=avail "$WORKDIR" | tail -1 | tr -dc '0-9')"
-  [[ "$free_gb" -ge "$MIN_FREE_DISK_GB" ]] || fail "only ${free_gb} GB free in $WORKDIR; need ${MIN_FREE_DISK_GB} GB"
-
-  [[ -n "${HF_TOKEN:-}" ]] || fail "HF_TOKEN is not set (create one at https://huggingface.co/settings/tokens)"
-  echo "OK: driver $driver_major, GPU ${gpu_memory} MiB, ${free_gb} GB free"
+  echo "OK"
 }
 
 install_tools() {
@@ -184,6 +285,9 @@ prepare_scenes_and_image() {
 
 main() {
   check_prerequisites
+  setup_data_dir
+  move_docker_data_root
+  check_container_gpu
   install_tools
   clone_repos
   setup_alpasim
@@ -192,7 +296,9 @@ main() {
   download_models
   prepare_scenes_and_image
   echo
-  echo "SETUP DONE. Next: bash $REPO/scripts/run_stages.sh 1   (then 2, then 3)"
+  echo "SETUP DONE. Everything is under $DATA_DIR."
+  echo "Next: cd $REPO && bash scripts/run_stages.sh 1   (then 2, then 3)"
+  echo "If $DATA_DIR is an ephemeral disk, stopping the VM wipes it: copy results off first."
 }
 
 main "$@"

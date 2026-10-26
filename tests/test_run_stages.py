@@ -83,6 +83,7 @@ def test_all_three_stages_produce_results_and_a_report(stub_env):
     for stage in ("1", "2", "3"):
         completed = run_stage(stage, stub_env)
         assert completed.returncode == 0, completed.stdout + completed.stderr
+        assert "rsync -avz --progress" in completed.stdout and f"{results}/ ./results/vm_test/" in completed.stdout
     assert "Estimated stage 3 time" in completed.stdout  # from stage 2's timing
 
     assert (results / "stage1/alpamayo1_5_builtin" / smoke / "aggregate/results-summary.json").exists()
@@ -102,6 +103,7 @@ def test_a_failing_scene_stops_the_stage_and_keeps_its_logs(stub_env):
     completed = run_stage("3", {**stub_env, "FAIL_SCENE": second_scene})
     assert completed.returncode != 0
     assert "STAGE FAILED" in completed.stderr
+    assert "REMINDER: copy the results off" in completed.stdout  # partial results are worth keeping too
     stage_dir = Path(stub_env["RESULTS_ROOT"]) / "vm_test/stage3/alpamayo1_5"
     assert len(list(stage_dir.iterdir())) == 2  # the good first scene and the failed one
     assert (stage_dir / second_scene / "txt-logs/runtime.log").exists()
