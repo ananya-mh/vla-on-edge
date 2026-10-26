@@ -33,6 +33,11 @@ DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[1] / "results" / "runs"
 def create_adapter(model_config: dict, agent_config: dict) -> ModelAdapter:
     """Instantiate the adapter named in the model's config entry."""
     adapter_name = model_config["adapter"]
+    if adapter_name == "alpasim_plugin":
+        raise ValueError(
+            f"model {model_config['name']!r} runs inside AlpaSim through plugins/alpasim_vla_on_edge, "
+            "not through run_benchmark"
+        )
     if adapter_name not in ADAPTERS:
         raise ValueError(f"unknown adapter {adapter_name!r}; known adapters: {sorted(ADAPTERS)}")
     return ADAPTERS[adapter_name](model_config, agent_config)

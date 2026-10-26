@@ -1,4 +1,8 @@
-# Model registry. The real models are added in milestone (b).
+# Model registry.
+#
+# `adapter` picks the integration path: a ModelAdapter name runs in our SimEnv loop
+# (mock now); `alpasim_plugin` means the model runs inside AlpaSim through
+# plugins/alpasim_vla_on_edge (milestone b), not through run_benchmark.
 #
 # `trajectory` is the shape of the model's native trajectory output. The validator
 # checks outputs against it as-is (no resampling); horizon_s must equal
@@ -19,3 +23,20 @@ models:
       waypoint_count: 6
       spacing_s: 0.5
       horizon_s: 3.0
+
+  alpamayo1_5:
+    adapter: alpasim_plugin
+    alpasim_driver: alpamayo1_5  # AlpaSim's built-in model name (src/driver/pyproject.toml entry points)
+    hf_id: nvidia/Alpamayo-1.5-10B  # from https://huggingface.co/nvidia/Alpamayo-1.5-10B
+    variant: bf16
+    reasoning: true                 # emits Chain-of-Causation text (model card)
+    validation_mode: flag_only      # never replace Alpamayo's native trajectory
+    license: "weights OpenMDW-1.1 (card: 'ready for non-commercial use'), code Apache-2.0"  # TODO_VERIFY terms
+    parameters: "~10B (8.2B Cosmos-Reason2 VLM + 2.3B diffusion action expert)"  # model card
+    architecture: dense
+    expected_gpu_memory_gb: 24      # 1 sample, repo README (H100); ~40 GB for 16 samples
+    trajectory:                     # model card "Output": 64 waypoints at 10 Hz over 6.4 s
+      waypoint_count: 64
+      spacing_s: 0.1
+      horizon_s: 6.4
+

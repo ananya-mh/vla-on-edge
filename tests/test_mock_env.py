@@ -98,3 +98,8 @@ def test_smoke_run_end_to_end(tmp_path, monkeypatch, action_format):
     assert all(step["fallback_reason"] is None for step in steps)
     assert all(step["prompt_hash"] for step in steps)
     assert all(record["log_format_version"] == 1 for record in steps + episodes)
+
+
+def test_alpasim_plugin_models_are_rejected_by_run_benchmark(tmp_path):
+    with pytest.raises(ValueError, match="runs inside AlpaSim"):
+        main(["--model", "alpamayo1_5", "--experiment", "smoke_test", "--results-dir", str(tmp_path)])
