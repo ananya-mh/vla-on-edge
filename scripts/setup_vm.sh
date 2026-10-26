@@ -14,7 +14,8 @@
 # Steps: check prerequisites -> install uv and Rust -> clone our repo and AlpaSim at
 # the pinned commit -> set up AlpaSim's environment -> install our plugin (--no-deps)
 # -> set up our report environment -> check Hugging Face access -> download
-# Alpamayo 1.5 -> download the scenes and build AlpaSim's image -> check configs.
+# the model files (offline-checked) -> download the scenes, pull and build images ->
+# check configs.
 # Every step fails fast with a message saying what to fix.
 set -euo pipefail
 
@@ -24,16 +25,15 @@ REPO_REF="${REPO_REF:-main}"
 ALPASIM_URL="https://github.com/NVlabs/alpasim.git"
 ALPASIM_COMMIT="affc2eab209fa43bdfa2f26c0f8d437922d78a68"  # the commit everything was built against
 MIN_DRIVER_MAJOR=570          # AlpaSim's renderer container uses CUDA 12.8 (docs/ONBOARDING.md)
-MIN_FREE_DISK_GB=200          # AlpaSim image + Alpamayo 1.5 (22 GB) + Cosmos-Reason2 + scenes + rollouts
+MIN_FREE_DISK_GB=200          # AlpaSim + renderer images, Alpamayo 1.5 (22 GB), scenes, rollouts
 MIN_GPU_MEMORY_MIB=80000      # plan: Alpamayo 1.5 and the renderer on one 80 GB GPU
-# Gated status as of 2026-10-26 (Hugging Face API): Cosmos-Reason2-8B is gated;
-# Alpamayo-1.5-10B is not, though AlpaSim's docs/TUTORIAL.md says to accept its terms.
-MODELS=("nvidia/Alpamayo-1.5-10B" "nvidia/Cosmos-Reason2-8B")
-SCENE_DATASET="nvidia/PhysicalAI-Autonomous-Vehicles-NuRec"     # gated (scenes/csv_utils.py)
-# Loaded by AlpaSim's driver at startup via alpamayo1_5.helper.get_processor
-# (alpamayo1_5/helper.py BASE_PROCESSOR_NAME); public. Only its small files are needed.
-PROCESSOR_REPO="Qwen/Qwen3-VL-2B-Instruct"
-NON_WEIGHT_FILES='["*.json", "*.txt", "*.jinja", "*.model", "tokenizer*"]'
+# Hugging Face repos the run needs; scripts/prepare_hf_cache.py says what each is for
+# and downloads only what is used. Gated status per the Hugging Face API on
+# 2026-10-26: Cosmos-Reason2-8B and the NuRec dataset are gated (accept the terms on
+# their pages); Alpamayo-1.5-10B and Qwen3-VL-2B-Instruct are not, although AlpaSim's
+# docs/TUTORIAL.md says to accept Alpamayo 1.5's terms.
+MODEL_REPOS=("nvidia/Alpamayo-1.5-10B" "nvidia/Cosmos-Reason2-8B" "Qwen/Qwen3-VL-2B-Instruct")
+SCENE_DATASET="nvidia/PhysicalAI-Autonomous-Vehicles-NuRec"  # scenes (wizard/scenes/csv_utils.py)
 
 REPO="$WORKDIR/vla-on-edge"
 ALPASIM="$REPO/third_party/alpasim"
@@ -122,7 +122,7 @@ setup_report_env() {
 
 check_hf_access() {
   step "Checking Hugging Face access to the gated models and scene dataset"
-  "$ALPASIM/.venv/bin/python" - "${MODELS[@]}" "$SCENE_DATASET" << 'EOF' || fail "Hugging Face access check failed (see above)"
+  "$ALPASIM/.venv/bin/python" - "${MODEL_REPOS[@]}" "$SCENE_DATASET" << 'EOF' || fail "Hugging Face access check failed (see above)"
 import sys
 from huggingface_hub import auth_check, whoami
 from huggingface_hub.errors import GatedRepoError, RepositoryNotFoundError
@@ -145,31 +145,11 @@ EOF
 }
 
 download_models() {
-  step "Downloading ${MODELS[*]} into the Hugging Face cache (mounted into the driver)"
-  "$ALPASIM/.venv/bin/python" -c "
-import sys
-from huggingface_hub import snapshot_download
-for repo_id in sys.argv[1:]:
-    print(snapshot_download(repo_id))
-" "${MODELS[@]}" || fail "model download failed"
-
-  step "Downloading what the driver would otherwise fetch at startup"
-  "$ALPASIM/.venv/bin/python" - "$PROCESSOR_REPO" "$NON_WEIGHT_FILES" << 'EOF' || fail "could not cache the driver's startup files"
-import json
-import sys
-from huggingface_hub import hf_hub_download, snapshot_download
-
-processor_repo, patterns = sys.argv[1], json.loads(sys.argv[2])
-print(snapshot_download(processor_repo, allow_patterns=patterns))
-# Alpamayo 1.5 loads its base VLM's config and processor from the repo named in its
-# own config.json (alpamayo1_5/models/base_model.py, config.vlm_name_or_path).
-config = json.load(open(hf_hub_download("nvidia/Alpamayo-1.5-10B", "config.json")))
-base_vlm = config.get("vlm_name_or_path")
-print("Alpamayo 1.5 base VLM:", base_vlm)
-if base_vlm is None:
-    sys.exit("config.json has no vlm_name_or_path; check alpamayo1_5's config format")
-print(snapshot_download(base_vlm, allow_patterns=patterns))
-EOF
+  step "Caching the model files the driver loads, then checking they load offline"
+  # Alpamayo 1.5 in full; only config/processor files of Cosmos-Reason2-8B (its
+  # weights are inside the Alpamayo checkpoint) and of the Qwen processor. Fails if
+  # the checkpoint names an unexpected base VLM, or if anything would need a download.
+  "$ALPASIM/.venv/bin/python" "$REPO/scripts/prepare_hf_cache.py" || fail "model download or offline check failed"
 }
 
 scene_ids() {

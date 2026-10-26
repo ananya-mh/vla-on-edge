@@ -39,6 +39,9 @@ services:
     environments:
       - "VLA_ON_EDGE_LOG_DIR=/mnt/output/vla_on_edge"
       - "VLA_ON_EDGE_CONFIG_DIR=/mnt/vla_on_edge/configs"  # the wheel is not next to configs/
+      # Use only the mounted Hugging Face cache (filled by scripts/prepare_hf_cache.py):
+      # a missing file fails at once instead of a slow or timed-out download.
+      - "HF_HUB_OFFLINE=1"
       # Recorded on the host by scripts/run_stages.sh for run metadata.
       - "VLA_ON_EDGE_GIT_COMMIT=${oc.env:VLA_ON_EDGE_GIT_COMMIT,unknown}"
       - "VLA_ON_EDGE_GIT_DIRTY=${oc.env:VLA_ON_EDGE_GIT_DIRTY,unknown}"

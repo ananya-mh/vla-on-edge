@@ -55,6 +55,10 @@ def check_compose_driver_service(log_dir: Path) -> list[str]:
         problems.append(f"{LOG_DIR_VARIABLE} is not set under /mnt/output (the mounted log dir)")
     if "VLA_ON_EDGE_CONFIG_DIR=/mnt/vla_on_edge/configs" not in environment:
         problems.append("VLA_ON_EDGE_CONFIG_DIR does not point at the mounted configs/")
+    if "HF_HUB_OFFLINE=1" not in environment:
+        problems.append("HF_HUB_OFFLINE=1 is not set; the driver could download at startup")
+    if not any(volume.endswith(":/root/.cache/huggingface") for volume in driver["volumes"]):
+        problems.append("the host Hugging Face cache is not mounted at /root/.cache/huggingface")
     commit = next((entry.split("=", 1)[1] for entry in environment if entry.startswith("VLA_ON_EDGE_GIT_COMMIT=")), None)
     if commit in (None, "", "unknown"):
         problems.append("VLA_ON_EDGE_GIT_COMMIT was not set on the host; run metadata would lack the commit")
