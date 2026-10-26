@@ -24,11 +24,11 @@ from alpasim_driver.models.base import (
 )
 from alpasim_plugins.plugins import models as model_registry
 
-from src.adapters.base import Action, Waypoint
-from src.agent.validator import find_violations
-from src.utils.config import CONFIG_DIR, load_model_config, load_yaml
-from src.utils.logging import LOG_FORMAT_VERSION, append_jsonl
-from src.utils.run_metadata import build_run_metadata, save_run_metadata
+from vla_on_edge.adapters.base import Action, Waypoint
+from vla_on_edge.agent.validator import find_violations
+from vla_on_edge.utils.config import CONFIG_DIR, load_model_config, load_yaml
+from vla_on_edge.utils.logging import LOG_FORMAT_VERSION, append_jsonl
+from vla_on_edge.utils.run_metadata import build_run_metadata, save_run_metadata
 
 LOG_DIR_VARIABLE = "VLA_ON_EDGE_LOG_DIR"
 

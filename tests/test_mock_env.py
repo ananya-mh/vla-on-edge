@@ -4,11 +4,11 @@ import math
 
 import pytest
 
-from src.adapters.base import Action, EgoState, MetaAction, Waypoint
-from src.run_benchmark import main
-from src.sim.mock_env import MockEnv, advance_along_waypoints
-from src.utils import config as config_module
-from src.utils.logging import LOG_FORMAT_VERSION, read_jsonl
+from vla_on_edge.adapters.base import Action, EgoState, MetaAction, Waypoint
+from vla_on_edge.run_benchmark import main
+from vla_on_edge.sim.mock_env import MockEnv, advance_along_waypoints
+from vla_on_edge.utils import config as config_module
+from vla_on_edge.utils.logging import LOG_FORMAT_VERSION, read_jsonl
 
 KEEP_LANE = Action(meta_action=MetaAction.KEEP_LANE)
 

@@ -8,7 +8,7 @@ meaningful Alpamayo input, so it ignores the prompt entirely.
 
 import time
 
-from src.adapters.base import Decision, ModelAdapter, Prompt, Waypoint
+from vla_on_edge.adapters.base import Decision, ModelAdapter, Prompt, Waypoint
 
 IDENTITY_ROTATION = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
 

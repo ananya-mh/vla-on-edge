@@ -2,8 +2,8 @@
 
 import pytest
 
-from src.adapters.base import MetaAction
-from src.agent.parser import ParseError, parse_action
+from vla_on_edge.adapters.base import MetaAction
+from vla_on_edge.agent.parser import ParseError, parse_action
 
 
 def test_plain_meta_action():

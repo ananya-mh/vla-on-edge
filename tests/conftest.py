@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.utils.config import CONFIG_DIR, load_model_config, load_scenarios, load_yaml
+from vla_on_edge.utils.config import CONFIG_DIR, load_model_config, load_scenarios, load_yaml
 
 
 @pytest.fixture

@@ -10,8 +10,8 @@ import random
 import re
 import time
 
-from src.adapters.base import Decision, MetaAction, ModelAdapter, Prompt
-from src.controller.trajectory import meta_action_to_waypoints
+from vla_on_edge.adapters.base import Decision, MetaAction, ModelAdapter, Prompt
+from vla_on_edge.controller.trajectory import meta_action_to_waypoints
 
 # Like a real model, the dummy reads the current speed from the prompt text.
 SPEED_PATTERN = re.compile(r"Speed: ([0-9.]+) m/s")

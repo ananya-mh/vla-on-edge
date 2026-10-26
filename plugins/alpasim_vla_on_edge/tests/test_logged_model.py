@@ -12,7 +12,7 @@ import pytest
 from alpasim_driver.models.base import BaseTrajectoryModel, DriveCommand, ModelPrediction, PredictionInput
 
 from alpasim_vla_on_edge.logged_model import LoggedAlpamayo15, LoggedModel, prediction_to_waypoints
-from src.utils.config import CONFIG_DIR, load_model_config, load_yaml
+from vla_on_edge.utils.config import CONFIG_DIR, load_model_config, load_yaml
 
 
 class FakeInnerDriver(BaseTrajectoryModel):

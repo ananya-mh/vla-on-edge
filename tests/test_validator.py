@@ -2,10 +2,10 @@
 
 import pytest
 
-from src.adapters.base import Action, MetaAction, Waypoint
-from src.agent.validator import find_violations, validate_action
-from src.controller.trajectory import meta_action_to_waypoints
-from src.utils.config import check_trajectory_spec
+from vla_on_edge.adapters.base import Action, MetaAction, Waypoint
+from vla_on_edge.agent.validator import find_violations, validate_action
+from vla_on_edge.controller.trajectory import meta_action_to_waypoints
+from vla_on_edge.utils.config import check_trajectory_spec
 
 
 def constant_speed_waypoints(speed_mps: float, count: int = 6) -> list[Waypoint]:

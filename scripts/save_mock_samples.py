@@ -11,11 +11,11 @@ from pathlib import Path
 import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT))  # so `src` imports work when run as a script
+sys.path.insert(0, str(REPO_ROOT))  # so `vla_on_edge` imports work when run as a script
 
-from src.adapters.base import Action, MetaAction  # noqa: E402
-from src.sim.mock_env import MockEnv  # noqa: E402
-from src.utils.config import CONFIG_DIR, load_scenarios, load_yaml  # noqa: E402
+from vla_on_edge.adapters.base import Action, MetaAction  # noqa: E402
+from vla_on_edge.sim.mock_env import MockEnv  # noqa: E402
+from vla_on_edge.utils.config import CONFIG_DIR, load_scenarios, load_yaml  # noqa: E402
 
 OUTPUT_DIR = REPO_ROOT / "results" / "samples"
 

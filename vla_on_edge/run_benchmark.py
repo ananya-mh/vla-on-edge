@@ -1,7 +1,7 @@
 """Command-line entry point: runs one model on every scenario and seed of an experiment.
 
 Example:
-    python -m src.run_benchmark --model dummy:bf16 --experiment smoke_test --sim mock
+    python -m vla_on_edge.run_benchmark --model dummy:bf16 --experiment smoke_test --sim mock
 
 Each run writes to results/runs/<timestamp>_<model>_<variant>_<experiment>/:
     metadata.json   git commit, resolved config, versions, GPU
@@ -14,16 +14,16 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from src.adapters.base import ModelAdapter
-from src.adapters.dummy_adapter import DummyAdapter
-from src.adapters.fake_alpamayo_adapter import FakeAlpamayoAdapter
-from src.agent.loop import run_episode
-from src.sim.base import SimEnv
-from src.sim.mock_env import MockEnv
-from src.sim.real_env import RealSimEnv
-from src.utils.config import resolve_run_config
-from src.utils.logging import LOG_FORMAT_VERSION, append_jsonl
-from src.utils.run_metadata import build_run_metadata, save_run_metadata
+from vla_on_edge.adapters.base import ModelAdapter
+from vla_on_edge.adapters.dummy_adapter import DummyAdapter
+from vla_on_edge.adapters.fake_alpamayo_adapter import FakeAlpamayoAdapter
+from vla_on_edge.agent.loop import run_episode
+from vla_on_edge.sim.base import SimEnv
+from vla_on_edge.sim.mock_env import MockEnv
+from vla_on_edge.sim.real_env import RealSimEnv
+from vla_on_edge.utils.config import resolve_run_config
+from vla_on_edge.utils.logging import LOG_FORMAT_VERSION, append_jsonl
+from vla_on_edge.utils.run_metadata import build_run_metadata, save_run_metadata
 
 # Maps the `adapter` field in models.yaml to an adapter class.
 ADAPTERS = {"dummy": DummyAdapter, "fake_alpamayo": FakeAlpamayoAdapter}

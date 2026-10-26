@@ -8,4 +8,4 @@ if [ ! -x "$PYTHON" ]; then
   echo "No virtual environment found. Run: source scripts/setup_env.sh" >&2
   exit 1
 fi
-"$PYTHON" -m src.run_benchmark "$@"
+"$PYTHON" -m vla_on_edge.run_benchmark "$@"

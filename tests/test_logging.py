@@ -1,7 +1,7 @@
 """Tests that the step log keeps the full pose of every waypoint."""
 
-from src.adapters.base import Action, Waypoint
-from src.utils.logging import append_jsonl, read_jsonl
+from vla_on_edge.adapters.base import Action, Waypoint
+from vla_on_edge.utils.logging import append_jsonl, read_jsonl
 
 IDENTITY = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
 

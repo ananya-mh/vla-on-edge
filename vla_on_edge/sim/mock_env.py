@@ -10,9 +10,9 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from src.adapters.base import Action, EgoState, Observation, Waypoint
-from src.controller.trajectory import action_to_waypoints
-from src.sim.base import SimEnv, StepEvents
+from vla_on_edge.adapters.base import Action, EgoState, Observation, Waypoint
+from vla_on_edge.controller.trajectory import action_to_waypoints
+from vla_on_edge.sim.base import SimEnv, StepEvents
 
 ROAD_COLOR = (90, 90, 90)
 OFF_ROAD_COLOR = (150, 120, 80)

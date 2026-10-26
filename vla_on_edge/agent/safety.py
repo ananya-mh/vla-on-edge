@@ -7,7 +7,7 @@ invalid or missing model output, while a safety override replaces a valid action
 that would be unsafe.
 """
 
-from src.adapters.base import Action, MetaAction, Observation
+from vla_on_edge.adapters.base import Action, MetaAction, Observation
 
 SAFETY_OVERRIDE_OBSTACLE = "obstacle_within_stopping_distance"
 

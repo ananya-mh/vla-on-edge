@@ -8,7 +8,7 @@ controller's waypoint times (`controller.waypoint_count` points,
 
 import math
 
-from src.adapters.base import Action, MetaAction, Waypoint
+from vla_on_edge.adapters.base import Action, MetaAction, Waypoint
 
 
 def waypoint_times(count: int, spacing_s: float) -> list[float]:

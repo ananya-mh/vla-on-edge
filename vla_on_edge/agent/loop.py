@@ -13,13 +13,13 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
-from src.adapters.base import Action, Decision, ModelAdapter, Observation, Prompt
-from src.agent.parser import ParseError, parse_action
-from src.agent.prompts import build_prompt, prompt_hash
-from src.agent.safety import apply_safety_check, choose_fallback
-from src.agent.validator import find_violations
-from src.sim.base import SimEnv
-from src.utils.logging import LOG_FORMAT_VERSION, append_jsonl
+from vla_on_edge.adapters.base import Action, Decision, ModelAdapter, Observation, Prompt
+from vla_on_edge.agent.parser import ParseError, parse_action
+from vla_on_edge.agent.prompts import build_prompt, prompt_hash
+from vla_on_edge.agent.safety import apply_safety_check, choose_fallback
+from vla_on_edge.agent.validator import find_violations
+from vla_on_edge.sim.base import SimEnv
+from vla_on_edge.utils.logging import LOG_FORMAT_VERSION, append_jsonl
 
 
 def call_adapter(adapter: ModelAdapter, prompt: Prompt, timeout_s: float) -> tuple[Decision | None, str | None]:

@@ -2,8 +2,8 @@
 
 import pytest
 
-from src.adapters.base import Action, MetaAction, Waypoint
-from src.controller.trajectory import action_to_waypoints, meta_action_to_waypoints
+from vla_on_edge.adapters.base import Action, MetaAction, Waypoint
+from vla_on_edge.controller.trajectory import action_to_waypoints, meta_action_to_waypoints
 
 
 def test_keep_lane_holds_speed_and_goes_straight(agent_config):

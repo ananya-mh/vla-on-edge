@@ -5,8 +5,8 @@ the exact setup is TBD). Its API is deliberately not guessed here. Fill each met
 once a simulator is chosen. Until then, use `mock_env.py`.
 """
 
-from src.adapters.base import Action, Observation
-from src.sim.base import SimEnv, StepEvents
+from vla_on_edge.adapters.base import Action, Observation
+from vla_on_edge.sim.base import SimEnv, StepEvents
 
 
 class RealSimEnv(SimEnv):
@@ -33,7 +33,7 @@ class RealSimEnv(SimEnv):
 
     def step(self, action: Action) -> StepEvents:
         # TODO: convert the action to the trajectory format the simulator expects.
-        # Meta-actions go through src.controller.trajectory.action_to_waypoints (ego
+        # Meta-actions go through vla_on_edge.controller.trajectory.action_to_waypoints (ego
         # frame, meters, x forward, y left, t seconds from now). Advance one step and
         # report collision, off-road, and route progress for this step.
         raise NotImplementedError

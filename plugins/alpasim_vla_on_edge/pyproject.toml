@@ -11,7 +11,7 @@ version = "0.1.0"
 description = "Logging wrapper around AlpaSim's built-in Alpamayo drivers"
 requires-python = ">=3.11"
 dependencies = [
-    "vla-on-edge",       # this repo's src package (validator, logger, configs)
+    "vla-on-edge",       # this repo's vla_on_edge package (validator, logger, configs)
     "alpasim_driver",    # provided by AlpaSim's environment
     "alpasim_plugins",   # provided by AlpaSim's environment
     "numpy",

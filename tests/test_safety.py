@@ -2,9 +2,9 @@
 
 import pytest
 
-from src.adapters.base import EgoState, MetaAction, Observation
-from src.agent.safety import choose_fallback, is_obstacle_within_stopping_range, stopping_distance_m
-from src.utils.config import apply_overrides
+from vla_on_edge.adapters.base import EgoState, MetaAction, Observation
+from vla_on_edge.agent.safety import choose_fallback, is_obstacle_within_stopping_range, stopping_distance_m
+from vla_on_edge.utils.config import apply_overrides
 
 
 def observation_with(speed_mps: float, gap_m: float | None) -> Observation:

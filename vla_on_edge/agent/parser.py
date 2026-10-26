@@ -11,7 +11,7 @@ is the validator's job.
 import json
 import re
 
-from src.adapters.base import Action, MetaAction, Waypoint
+from vla_on_edge.adapters.base import Action, MetaAction, Waypoint
 
 THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL)
 CODE_FENCE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)

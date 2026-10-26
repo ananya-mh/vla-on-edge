@@ -1,8 +1,8 @@
 """Tests for the agent loop's fallback, safety override, and truncation handling."""
 
-from src.adapters.base import Decision, ModelAdapter
-from src.agent.loop import run_step
-from src.sim.mock_env import MockEnv
+from vla_on_edge.adapters.base import Decision, ModelAdapter
+from vla_on_edge.agent.loop import run_step
+from vla_on_edge.sim.mock_env import MockEnv
 
 
 class ScriptedAdapter(ModelAdapter):

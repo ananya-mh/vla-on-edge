@@ -8,7 +8,7 @@ same observation. The prompt hash lets us check that in the logs.
 import hashlib
 import math
 
-from src.adapters.base import Action, Observation, Prompt
+from vla_on_edge.adapters.base import Action, Observation, Prompt
 
 
 def describe_history(history: list[Action]) -> str:

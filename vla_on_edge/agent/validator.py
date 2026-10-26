@@ -17,8 +17,8 @@ violations. This module never changes an action.
 
 import math
 
-from src.adapters.base import Action, Waypoint
-from src.controller.trajectory import waypoint_times
+from vla_on_edge.adapters.base import Action, Waypoint
+from vla_on_edge.controller.trajectory import waypoint_times
 
 # Allowed backwards motion (m) between consecutive waypoints, to absorb rounding.
 BACKWARD_TOLERANCE_M = 0.1

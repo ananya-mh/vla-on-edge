@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from src.adapters.base import Action, Observation
+from vla_on_edge.adapters.base import Action, Observation
 
 
 @dataclass

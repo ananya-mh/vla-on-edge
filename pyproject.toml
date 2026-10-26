@@ -1,4 +1,4 @@
-# Makes this repo's `src` package installable, so the AlpaSim plugin
+# Makes this repo's `vla_on_edge` package installable, so the AlpaSim plugin
 # (plugins/alpasim_vla_on_edge) can import our validator and logger.
 # Install it editable: configs are read from this checkout's configs/ folder.
 [build-system]
@@ -13,4 +13,4 @@ requires-python = ">=3.11"
 dependencies = ["numpy", "PyYAML"]
 
 [tool.setuptools.packages.find]
-include = ["src*"]
+include = ["vla_on_edge*"]
