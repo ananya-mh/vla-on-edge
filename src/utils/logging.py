@@ -3,6 +3,10 @@
 import json
 from pathlib import Path
 
+# Version of the step and episode record layout. Bump it whenever a field is added,
+# removed, renamed, or changes meaning, so analysis code can tell old logs apart.
+LOG_FORMAT_VERSION = 1
+
 
 def append_jsonl(path: Path, record: dict) -> None:
     """Append one record to a JSONL file, creating the file if needed.

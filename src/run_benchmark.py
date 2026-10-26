@@ -21,7 +21,7 @@ from src.sim.base import SimEnv
 from src.sim.mock_env import MockEnv
 from src.sim.real_env import RealSimEnv
 from src.utils.config import resolve_run_config
-from src.utils.logging import append_jsonl
+from src.utils.logging import LOG_FORMAT_VERSION, append_jsonl
 from src.utils.run_metadata import build_run_metadata, save_run_metadata
 
 # Maps the `adapter` field in models.yaml to an adapter class.
@@ -94,7 +94,13 @@ def main(argv: list[str] | None = None) -> Path | None:
                 run_config["model"],
                 run_dir / "steps.jsonl",
             )
-            episode_record = {"scenario": scenario["name"], "seed": seed, "tags": scenario["tags"], **episode_metrics}
+            episode_record = {
+                "log_format_version": LOG_FORMAT_VERSION,
+                "scenario": scenario["name"],
+                "seed": seed,
+                "tags": scenario["tags"],
+                **episode_metrics,
+            }
             append_jsonl(run_dir / "episodes.jsonl", episode_record)
             print(f"{scenario['name']} seed={seed}: {episode_metrics}")
 

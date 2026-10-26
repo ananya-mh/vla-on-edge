@@ -97,3 +97,4 @@ def test_smoke_run_end_to_end(tmp_path, monkeypatch, action_format):
     # The dummy only produces valid actions, so nothing should fall back.
     assert all(step["fallback_reason"] is None for step in steps)
     assert all(step["prompt_hash"] for step in steps)
+    assert all(record["log_format_version"] == 1 for record in steps + episodes)

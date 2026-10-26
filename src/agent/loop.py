@@ -19,7 +19,7 @@ from src.agent.prompts import build_prompt, prompt_hash
 from src.agent.safety import apply_safety_check, choose_fallback
 from src.agent.validator import find_violations
 from src.sim.base import SimEnv
-from src.utils.logging import append_jsonl
+from src.utils.logging import LOG_FORMAT_VERSION, append_jsonl
 
 
 def call_adapter(adapter: ModelAdapter, prompt: Prompt, timeout_s: float) -> tuple[Decision | None, str | None]:
@@ -97,6 +97,7 @@ def run_step(
 
     events = env.step(executed_action)
     record = {
+        "log_format_version": LOG_FORMAT_VERSION,
         "step_index": observation.step_index,
         "timestamp_s": observation.timestamp_s,
         "prompt_hash": current_prompt_hash,
