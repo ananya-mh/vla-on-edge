@@ -40,6 +40,24 @@ models:
       spacing_s: 0.1
       horizon_s: 6.4
 
+  alpamayo2_super:
+    adapter: alpasim_plugin
+    alpasim_driver: alpamayo2       # AlpaSim's built-in model name (src/driver/pyproject.toml entry points)
+    hf_id: nvidia/Alpamayo2-Super   # from https://huggingface.co/nvidia/Alpamayo2-Super (not gated, 2026-10-26)
+    variant: bf16
+    reasoning: true                 # emits Chain-of-Causation text (model card "Output")
+    validation_mode: flag_only      # never replace Alpamayo's native trajectory
+    license: "weights OpenMDW-1.1, code Apache-2.0"  # model card; TODO_VERIFY terms
+    parameters: "~34B (32B Cosmos 3 Super VLM + 2.3B diffusion action expert); 35.8B in the checkpoint index"
+    architecture: dense             # TODO_VERIFY: the card does not say dense or MoE
+    # Card: 72,115 MiB peak device memory on one H100 80GB (7 cameras, 4 frames, batch 1,
+    # 1 sample, BF16, SDPA); weights alone are 71.6 GB. AlpaSim's driver uses 4 cameras.
+    expected_gpu_memory_gb: 72
+    trajectory:                     # model card "Output": 64 waypoints, 0.1 s through 6.4 s
+      waypoint_count: 64
+      spacing_s: 0.1
+      horizon_s: 6.4
+
   fake_alpamayo1_5:
     adapter: fake_alpamayo          # mock-env plumbing test only; not Alpamayo's driving quality
     variant: bf16

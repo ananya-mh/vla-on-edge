@@ -6,52 +6,12 @@
 #     driver=alpamayo1_5 \
 #     'hydra.searchpath=[file:///path/to/vla-on-edge/configs/alpasim]' +vla_on_edge=alpamayo1_5 \
 #     wizard.log_dir=... 'scenes.scene_ids=[...]'
-#
-# The driver runs in AlpaSim's container, so our repo is mounted into it read-only
-# and our two packages are installed from wheels built on the host
-# (scripts/build_wheels.sh -> dist/wheels/) right before the driver starts:
-# --offline --no-deps, so no network and nothing written into the mounted repo.
-# Logs go to /mnt/output/vla_on_edge, which is <wizard.log_dir>/vla_on_edge on the
-# host (AlpaSim already mounts log_dir there).
+# Everything except the wrapper's name is shared with Alpamayo 2 Super (wrapper.yaml).
+
+defaults:
+  - wrapper
+  - _self_
 
 driver:
   model:
     model_type: vla_on_edge_alpamayo1_5  # our wrapper's alpasim.models entry point
-
-runtime:
-  simulation_config:
-    # One rollout per scene: our step logs cannot tell rollouts apart, so each
-    # scene runs in its own wizard invocation with exactly one rollout.
-    n_rollouts: 1
-
-services:
-  driver:
-    # Hydra cannot append to a list, so this restates AlpaSim's driver volumes
-    # (third_party/alpasim/src/wizard/configs/base_config.yaml, services.driver)
-    # and adds our repo as the last entry.
-    volumes:
-      - "${defines.drivers}:/mnt/drivers"
-      - "${wizard.log_dir}:/mnt/output"
-      - "${repo-relative:'src'}:/repo/src"
-      - "${repo-relative:'plugins'}:/repo/plugins"
-      - "${defines.hf_cache}:/root/.cache/huggingface"
-      - "${oc.env:VLA_ON_EDGE_REPO}:/mnt/vla_on_edge:ro"
-    environments:
-      - "VLA_ON_EDGE_LOG_DIR=/mnt/output/vla_on_edge"
-      - "VLA_ON_EDGE_CONFIG_DIR=/mnt/vla_on_edge/configs"  # the wheel is not next to configs/
-      # Use only the mounted Hugging Face cache (filled by scripts/prepare_hf_cache.py):
-      # a missing file fails at once instead of a slow or timed-out download.
-      - "HF_HUB_OFFLINE=1"
-      # Recorded on the host by scripts/run_stages.sh for run metadata.
-      - "VLA_ON_EDGE_GIT_COMMIT=${oc.env:VLA_ON_EDGE_GIT_COMMIT,unknown}"
-      - "VLA_ON_EDGE_GIT_DIRTY=${oc.env:VLA_ON_EDGE_GIT_DIRTY,unknown}"
-      - "VLA_ON_EDGE_COMPOSE_VERSION=${oc.env:VLA_ON_EDGE_COMPOSE_VERSION,unknown}"
-    # AlpaSim joins these with spaces and runs them in a shell.
-    command:
-      - "uv pip install --python /repo/.venv/bin/python --offline --no-deps --reinstall"
-      - "/mnt/vla_on_edge/dist/wheels/*.whl &&"
-      - "uv run -m alpasim_driver.main"
-      - "--config-path=/mnt/output"
-      - "--config-name=driver-config.yaml"
-      - "host=0.0.0.0"
-      - "port={port}"

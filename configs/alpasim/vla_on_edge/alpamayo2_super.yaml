@@ -1,0 +1,18 @@
+# @package _global_
+# AlpaSim (Hydra) overrides that run Alpamayo 2 Super through our logging wrapper.
+#
+# Use together with AlpaSim's own driver config (driver=alpamayo2), from third_party/alpasim:
+#   VLA_ON_EDGE_REPO=/path/to/vla-on-edge uv run alpasim_wizard deploy=local \
+#     topology=vla_on_edge_2gpu driver=alpamayo2 \
+#     'hydra.searchpath=[file:///path/to/vla-on-edge/configs/alpasim]' +vla_on_edge=alpamayo2_super \
+#     wizard.log_dir=... 'scenes.scene_ids=[...]'
+# (topology=1gpu also works if the model, renderer, and physics fit on one GPU.)
+# Everything except the wrapper's name is shared with Alpamayo 1.5 (wrapper.yaml).
+
+defaults:
+  - wrapper
+  - _self_
+
+driver:
+  model:
+    model_type: vla_on_edge_alpamayo2_super  # our wrapper's alpasim.models entry point

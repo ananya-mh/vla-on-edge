@@ -1,9 +1,9 @@
 """A thin wrapper around one of AlpaSim's built-in driver models.
 
 AlpaSim calls `predict_batch` on the wrapper; the wrapper calls the real model
-(e.g. AlpaSim's own `alpamayo1_5`), validates each returned trajectory in flag-only
-mode, writes one JSONL record per prediction, and returns the predictions
-unchanged. It never reimplements or alters the wrapped model.
+(AlpaSim's own `alpamayo1_5` or `alpamayo2`), validates each returned
+trajectory in flag-only mode, writes one JSONL record per prediction, and returns
+the predictions unchanged. It never reimplements or alters the wrapped model.
 
 Each wrapped model gets its own entry point (see pyproject.toml), because AlpaSim's
 driver ModelConfig has a fixed schema with no room for our settings. The log
@@ -143,6 +143,13 @@ class LoggedAlpamayo15(LoggedModel):
 
     INNER_MODEL_TYPE = "alpamayo1_5"
     MODEL_NAME = "alpamayo1_5"
+
+
+class LoggedAlpamayo2Super(LoggedModel):
+    """AlpaSim's built-in Alpamayo 2 Super driver (`alpamayo2`), logged."""
+
+    INNER_MODEL_TYPE = "alpamayo2"
+    MODEL_NAME = "alpamayo2_super"
 
 
 def simulation_time_us(prediction_input: PredictionInput, prediction: ModelPrediction) -> int | None:

@@ -17,9 +17,10 @@ dependencies = [
     "numpy",
 ]
 
-# `driver.model.model_type: vla_on_edge_alpamayo1_5` selects the wrapper.
+# `driver.model.model_type: vla_on_edge_<model>` selects the wrapper for that model.
 [project.entry-points."alpasim.models"]
 vla_on_edge_alpamayo1_5 = "alpasim_vla_on_edge.logged_model:LoggedAlpamayo15"
+vla_on_edge_alpamayo2_super = "alpasim_vla_on_edge.logged_model:LoggedAlpamayo2Super"
 
 [tool.setuptools.packages.find]
 include = ["alpasim_vla_on_edge*"]

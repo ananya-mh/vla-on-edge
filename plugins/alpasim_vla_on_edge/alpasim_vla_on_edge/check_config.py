@@ -2,16 +2,19 @@
 
 Run with AlpaSim's Python on a wizard log dir made with `wizard.run_method=NONE`
 (or `deploy=docker_build_only`):
-    python -m alpasim_vla_on_edge.check_config <log_dir>             # our wrapper
-    python -m alpasim_vla_on_edge.check_config <log_dir> --builtin   # stage 1
+    python -m alpasim_vla_on_edge.check_config <log_dir> [--model M] [--layout L] [--builtin]
+M is alpamayo1_5 (default) or alpamayo2_super; L is 1gpu (default) or 2gpu;
+--builtin checks a stage 1 run (AlpaSim's own driver) instead of our wrapper.
 
 It repeats the two steps the driver does at startup that can fail on config: the
 strict schema merge of driver-config.yaml and the plugin registry lookup of
-model_type. It also checks the docker-compose driver service: for both runs, that
-it is offline against the mounted Hugging Face cache; for the wrapper, our mount,
-environment variables, and install command.
+model_type. It also checks the docker-compose services: for both runs, that the
+driver is offline against the mounted Hugging Face cache and that each service is on
+the GPU the layout says; for the wrapper, our mount, environment variables, and
+install command.
 """
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -22,8 +25,17 @@ from omegaconf import OmegaConf
 
 from alpasim_vla_on_edge.logged_model import LOG_DIR_VARIABLE
 
-WRAPPER_MODEL_TYPE = "vla_on_edge_alpamayo1_5"
-BUILTIN_MODEL_TYPE = "alpamayo1_5"  # AlpaSim's own driver, wrapped by ours
+# models.yaml key -> (our wrapper's model_type, AlpaSim's built-in model_type it wraps)
+MODEL_TYPES = {
+    "alpamayo1_5": ("vla_on_edge_alpamayo1_5", "alpamayo1_5"),
+    "alpamayo2_super": ("vla_on_edge_alpamayo2_super", "alpamayo2"),
+}
+# GPU ids per service for each layout: AlpaSim's topology/1gpu.yaml, and our
+# configs/alpasim/topology/vla_on_edge_2gpu.yaml (the driver alone on GPU 0).
+GPU_LAYOUTS = {
+    "1gpu": {"driver": ["0"], "renderer": ["0"], "physics": ["0"]},
+    "2gpu": {"driver": ["0"], "renderer": ["1"], "physics": ["1"]},
+}
 
 
 def check_driver_config(log_dir: Path, expected_model_type: str) -> list[str]:
@@ -39,11 +51,31 @@ def check_driver_config(log_dir: Path, expected_model_type: str) -> list[str]:
     return problems
 
 
-def load_driver_service(log_dir: Path) -> dict | None:
-    """Return the one driver service in docker-compose.yaml, or None if there is not exactly one."""
-    compose = yaml.safe_load((log_dir / "docker-compose.yaml").read_text())
-    drivers = [service for name, service in compose["services"].items() if name.startswith("driver")]
+def load_services(log_dir: Path) -> dict[str, dict]:
+    """Return docker-compose.yaml's services by name (e.g. driver-0, renderer-0)."""
+    return yaml.safe_load((log_dir / "docker-compose.yaml").read_text())["services"]
+
+
+def find_driver_service(services: dict[str, dict]) -> dict | None:
+    """Return the one driver service, or None if there is not exactly one."""
+    drivers = [service for name, service in services.items() if name.startswith("driver")]
     return drivers[0] if len(drivers) == 1 else None
+
+
+def gpu_ids(service: dict) -> list[str]:
+    """Return the GPU ids docker compose gives a service (empty if none)."""
+    devices = service.get("deploy", {}).get("resources", {}).get("reservations", {}).get("devices", [])
+    return [gpu_id for device in devices for gpu_id in device.get("device_ids", [])]
+
+
+def check_gpu_layout(services: dict[str, dict], layout: str) -> list[str]:
+    """Each GPU service must be exactly on the layout's GPUs (e.g. 2 Super alone on GPU 0)."""
+    problems = []
+    for prefix, expected in GPU_LAYOUTS[layout].items():
+        found = [gpu_ids(service) for name, service in services.items() if name.startswith(prefix)]
+        if found != [expected]:
+            problems.append(f"{prefix} GPUs are {found}, expected one {prefix} service on {expected} ({layout})")
+    return problems
 
 
 def check_offline_cache(driver: dict) -> list[str]:
@@ -78,11 +110,13 @@ def check_wrapper_driver_service(driver: dict) -> list[str]:
     return problems
 
 
-def check_run(log_dir: Path, builtin: bool) -> list[str]:
+def check_run(log_dir: Path, model: str, layout: str, builtin: bool) -> list[str]:
     """Return every problem with the generated configs (empty if fine)."""
-    model_type = BUILTIN_MODEL_TYPE if builtin else WRAPPER_MODEL_TYPE
-    problems = check_driver_config(log_dir, model_type)
-    driver = load_driver_service(log_dir)
+    wrapper_type, builtin_type = MODEL_TYPES[model]
+    problems = check_driver_config(log_dir, builtin_type if builtin else wrapper_type)
+    services = load_services(log_dir)
+    problems += check_gpu_layout(services, layout)
+    driver = find_driver_service(services)
     if driver is None:
         return problems + ["expected exactly one driver service in docker-compose.yaml"]
     problems += check_offline_cache(driver)
@@ -93,17 +127,22 @@ def check_run(log_dir: Path, builtin: bool) -> list[str]:
 
 def main() -> None:
     """Print each problem and exit non-zero if there are any."""
-    log_dir = Path(sys.argv[1])
-    builtin = sys.argv[2:] == ["--builtin"]
-    problems = check_run(log_dir, builtin)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("log_dir", type=Path)
+    parser.add_argument("--model", choices=sorted(MODEL_TYPES), default="alpamayo1_5")
+    parser.add_argument("--layout", choices=sorted(GPU_LAYOUTS), default="1gpu")
+    parser.add_argument("--builtin", action="store_true", help="AlpaSim's own driver (stage 1), not our wrapper")
+    args = parser.parse_args()
+    problems = check_run(args.log_dir, args.model, args.layout, args.builtin)
     for problem in problems:
         print(f"PROBLEM: {problem}")
     if problems:
         sys.exit(1)
-    if builtin:
-        print(f"OK: {log_dir} runs AlpaSim's {BUILTIN_MODEL_TYPE} offline against the mounted cache")
+    wrapper_type, builtin_type = MODEL_TYPES[args.model]
+    if args.builtin:
+        print(f"OK: {args.log_dir} runs AlpaSim's {builtin_type} offline against the mounted cache ({args.layout})")
     else:
-        print(f"OK: {log_dir} runs {WRAPPER_MODEL_TYPE} with our logging, offline")
+        print(f"OK: {args.log_dir} runs {wrapper_type} with our logging, offline ({args.layout})")
 
 
 if __name__ == "__main__":

@@ -11,7 +11,12 @@ import numpy as np
 import pytest
 from alpasim_driver.models.base import BaseTrajectoryModel, DriveCommand, ModelPrediction, PredictionInput
 
-from alpasim_vla_on_edge.logged_model import LoggedAlpamayo15, LoggedModel, prediction_to_waypoints
+from alpasim_vla_on_edge.logged_model import (
+    LoggedAlpamayo2Super,
+    LoggedAlpamayo15,
+    LoggedModel,
+    prediction_to_waypoints,
+)
 from vla_on_edge.utils.config import CONFIG_DIR, load_model_config, load_yaml
 
 
@@ -65,10 +70,12 @@ def make_input(speed_mps: float = 8.0) -> PredictionInput:
     )
 
 
-def make_wrapper(inner: BaseTrajectoryModel, tmp_path) -> LoggedModel:
-    model_config = load_model_config(CONFIG_DIR, "alpamayo1_5", None)
+def make_wrapper(
+    inner: BaseTrajectoryModel, tmp_path, wrapper_class: type[LoggedModel] = LoggedAlpamayo15
+) -> LoggedModel:
+    model_config = load_model_config(CONFIG_DIR, wrapper_class.MODEL_NAME, None)
     limits = load_yaml(CONFIG_DIR / "agent.yaml")["limits"]
-    return LoggedAlpamayo15(inner, model_config, limits, tmp_path)
+    return wrapper_class(inner, model_config, limits, tmp_path)
 
 
 def read_records(tmp_path) -> list[dict]:
@@ -142,10 +149,27 @@ def test_timestamps_from_the_prediction_are_used_when_present():
     assert waypoints[-1].t == pytest.approx(6.4)
 
 
-def test_entry_point_is_registered_with_alpasim():
+def test_entry_points_are_registered_with_alpasim():
     names = [entry.name for entry in entry_points(group="alpasim.models")]
-    assert "vla_on_edge_alpamayo1_5" in names
-    assert "alpamayo1_5" in names  # the built-in model we wrap
+    assert "vla_on_edge_alpamayo1_5" in names and "alpamayo1_5" in names  # ours and the built-in it wraps
+    assert "vla_on_edge_alpamayo2_super" in names and "alpamayo2" in names
+
+
+def test_alpamayo2_super_wrapper_wraps_alpasims_alpamayo2_driver():
+    from alpasim_driver.models.alpamayo2_model import Alpamayo2Model
+    from alpasim_plugins.plugins import models as model_registry
+
+    assert model_registry.get(LoggedAlpamayo2Super.INNER_MODEL_TYPE) is Alpamayo2Model
+    assert model_registry.get("vla_on_edge_alpamayo2_super") is LoggedAlpamayo2Super
+
+
+def test_alpamayo2_super_wrapper_logs_its_own_model_name(tmp_path):
+    # Same output shape as Alpamayo 1.5 (64 waypoints at 10 Hz, per both model cards).
+    wrapper = make_wrapper(FakeInnerDriver(speed_mps=8.0), tmp_path, LoggedAlpamayo2Super)
+    wrapper.predict(make_input())
+    record = read_records(tmp_path)[0]
+    assert record["model"] == "alpamayo2_super"
+    assert record["validation_violations"] == []
 
 
 def test_simulation_time_prefers_the_model_origin():
