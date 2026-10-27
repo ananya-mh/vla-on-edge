@@ -1,4 +1,4 @@
-# Troubleshooting: getting AlpaSim + Alpamayo 1.5 running
+# Troubleshooting: getting AlpaSim + Alpamayo running
 
 Problems we hit, in the order we hit them.
 
@@ -56,3 +56,8 @@ Problems we hit, in the order we hit them.
 - Symptom: upgrading from 570 to 580 failed with conflicts between the two driver versions' packages.
 - Cause: the packages for the two driver versions overlap.
 - Fix: start a new VM with driver 580 or newer, or with no driver. bootstrap_vm.sh installs `nvidia-driver-580-open` only when no driver is present, and never over an existing one.
+
+## AlpaSim's 2-GPU topology would load Alpamayo 2 Super three times
+- Symptom: (found before running) `topology=2gpu` puts 3 driver replicas on GPU 0.
+- Cause: it is sized for small models; 2 Super needs about 70 GiB per copy.
+- Fix: our `topology=vla_on_edge_2gpu` (configs/alpasim/topology/): the model alone on GPU 0, the rest on GPU 1. check_config checks each service's GPU.
