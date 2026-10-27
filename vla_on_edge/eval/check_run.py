@@ -59,6 +59,8 @@ def check_plugin_logs(log_dir: Path, time_range: tuple[int, int] | None, model: 
     expected_points = load_model_config(CONFIG_DIR, model, None)["trajectory"]["waypoint_count"]
     if any(record["log_format_version"] != LOG_FORMAT_VERSION for record in records):
         problems.append(f"some records are not log_format_version {LOG_FORMAT_VERSION}")
+    if any(record["model"] != model for record in records):
+        problems.append(f"some records are not from {model} (wrong wrapper?)")
     if any(len(record["executed_action"]["waypoints"]) != expected_points for record in records):
         problems.append(f"some trajectories do not have {expected_points} waypoints")
     if time_range is not None:

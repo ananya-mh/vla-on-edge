@@ -13,12 +13,16 @@
 # script after a restart.
 #
 # Usage:
-#   HF_TOKEN=hf_... bash setup_vm.sh            # e.g. curl the file onto the VM first
+#   HF_TOKEN=hf_... [MODEL=alpamayo2_super] bash setup_vm.sh   # e.g. curl the file onto the VM first
 # Options (environment variables):
-#   DATA_DIR  large disk for everything above    (default: the ephemeral mount, e.g.
-#             /ephemeral; else $HOME/vla_data if / has MIN_FREE_DISK_GB free)
-#   REPO_URL  our repo                           (default: GitHub origin below)
-#   REPO_REF  branch, tag, or commit to check out (default: main)
+#   MODEL       alpamayo1_5 | alpamayo2_super: which model to download and check
+#               (default: alpamayo1_5). Recorded in vm.env for run_stages.sh.
+#   GPU_LAYOUT  1gpu | 2gpu (default: 2gpu if the VM has 2+ GPUs, else 1gpu; see
+#               run_stages.sh). Recorded in vm.env.
+#   DATA_DIR    large disk for everything above  (default: the ephemeral mount, e.g.
+#               /ephemeral; else $HOME/vla_data if / has enough free space)
+#   REPO_URL    our repo                          (default: GitHub origin below)
+#   REPO_REF    branch, tag, or commit to check out (default: main)
 #
 # Steps: check prerequisites -> install uv and Rust -> clone our repo and AlpaSim at
 # the pinned commit -> set up AlpaSim's environment -> install our plugin (--no-deps)
@@ -36,18 +40,34 @@ ALPASIM_COMMIT="affc2eab209fa43bdfa2f26c0f8d437922d78a68"  # the commit everythi
 # which failed on 570 on our first VM; its renderer needs CUDA 12.8 (570+,
 # docs/ONBOARDING.md), so 580 covers both.
 MIN_DRIVER_MAJOR=580
-MIN_FREE_DISK_GB=200          # AlpaSim + renderer images, Alpamayo 1.5 (22 GB), scenes, rollouts
+MODEL="${MODEL:-alpamayo1_5}"
+GPU_LAYOUT="${GPU_LAYOUT:-}"
+# Free space needed on DATA_DIR. Alpamayo 1.5: 200 GB for AlpaSim's image and build
+# cache, the renderer image, the model files (22 GB), uv's cache, 8 scenes, and
+# rollouts with videos. Alpamayo 2 Super: the same with its 71.6 GB checkpoint
+# instead (about 250 GB), rounded up to 300 GB, which also leaves room to cache 1.5.
+case "$MODEL" in
+  alpamayo1_5) MIN_FREE_DISK_GB=200 ;;
+  alpamayo2_super) MIN_FREE_DISK_GB=300 ;;
+  *) echo "SETUP FAILED: unknown MODEL=$MODEL (alpamayo1_5 | alpamayo2_super)" >&2; exit 1 ;;
+esac
 # Where VM providers mount a local scratch disk (Hyperstack: /ephemeral, per
 # docs.hyperstack.cloud/docs/storage/ephemeral).
 EPHEMERAL_MOUNTS=(/ephemeral /mnt/ephemeral)
-MIN_GPU_MEMORY_MIB=80000      # plan: Alpamayo 1.5 and the renderer on one 80 GB GPU
-# Hugging Face repos the run needs; scripts/prepare_hf_cache.py says what each is for
-# and downloads only what is used. Gated status per the Hugging Face API on
-# 2026-10-26: Cosmos-Reason2-8B and the NuRec dataset are gated (accept the terms on
-# their pages); Alpamayo-1.5-10B and the Qwen3-VL repos are not, although AlpaSim's
-# docs/TUTORIAL.md says to accept Alpamayo 1.5's terms.
-MODEL_REPOS=("nvidia/Alpamayo-1.5-10B" "nvidia/Cosmos-Reason2-8B" "Qwen/Qwen3-VL-8B-Instruct"
-             "Qwen/Qwen3-VL-2B-Instruct")
+MIN_GPU_MEMORY_MIB=80000      # 80 GB GPUs (A100/H100 80GB)
+# Hugging Face repos each model's driver loads; scripts/prepare_hf_cache.py says what
+# each is for and downloads only what is used. Gated status per the Hugging Face API
+# on 2026-10-26: Cosmos-Reason2-8B and the NuRec dataset are gated (accept the terms
+# on their pages); Alpamayo-1.5-10B, Alpamayo2-Super, and the Qwen3-VL repos are not,
+# although AlpaSim's docs/TUTORIAL.md says to accept Alpamayo 1.5's terms.
+if [[ "$MODEL" == alpamayo1_5 ]]; then
+  MODEL_REPOS=("nvidia/Alpamayo-1.5-10B" "nvidia/Cosmos-Reason2-8B" "Qwen/Qwen3-VL-8B-Instruct"
+               "Qwen/Qwen3-VL-2B-Instruct")
+  ALPASIM_DRIVER=alpamayo1_5
+else
+  MODEL_REPOS=("nvidia/Alpamayo2-Super")  # self-contained: see prepare_hf_cache.py
+  ALPASIM_DRIVER=alpamayo2
+fi
 SCENE_DATASET="nvidia/PhysicalAI-Autonomous-Vehicles-NuRec"  # scenes (wizard/scenes/csv_utils.py)
 
 # setup_data_dir sets WORKDIR="$DATA_DIR/bench", REPO="$WORKDIR/vla-on-edge", and
@@ -68,15 +88,32 @@ check_prerequisites() {
   docker compose version > /dev/null 2>&1 || fail "the docker compose plugin is missing"
   docker buildx version > /dev/null 2>&1 || fail "the docker buildx plugin is missing"
 
-  local driver_major gpu_memory
+  local driver_major gpu_memory gpu_count
   driver_major="$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -1 | cut -d. -f1)"
   [[ "$driver_major" -ge "$MIN_DRIVER_MAJOR" ]] || fail "NVIDIA driver $driver_major is too old: need $MIN_DRIVER_MAJOR+ \
 (CUDA 13; AlpaSim's physics uses Warp 1.18.0). Don't upgrade the driver in place (570 -> 580 \
 broke on a package conflict); start a new VM with a $MIN_DRIVER_MAJOR+ driver, or one with no driver and run scripts/bootstrap_vm.sh"
   gpu_memory="$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -1)"
   [[ "$gpu_memory" -ge "$MIN_GPU_MEMORY_MIB" ]] || echo "WARNING: GPU 0 has ${gpu_memory} MiB; the plan assumes 80 GB"
+  gpu_count="$(nvidia-smi -L | grep -c '^GPU' || true)"
+  if [[ -z "$GPU_LAYOUT" ]]; then
+    GPU_LAYOUT=1gpu
+    [[ "$gpu_count" -ge 2 ]] && GPU_LAYOUT=2gpu
+  fi
+  case "$GPU_LAYOUT" in
+    1gpu) TOPOLOGY=1gpu ;;
+    2gpu) TOPOLOGY=vla_on_edge_2gpu
+          [[ "$gpu_count" -ge 2 ]] || fail "GPU_LAYOUT=2gpu needs 2 GPUs; this VM has $gpu_count" ;;
+    *) fail "unknown GPU_LAYOUT=$GPU_LAYOUT (1gpu | 2gpu)" ;;
+  esac
+  if [[ "$MODEL" == alpamayo2_super && "$GPU_LAYOUT" == 1gpu ]]; then
+    # Model card: 72,115 MiB peak on one H100 (7 cameras); AlpaSim uses 4. Measured on
+    # VM 1: renderer 1.6 GiB. Physics on GPU 0 too: a few GiB of headroom at best.
+    echo "WARNING: Alpamayo 2 Super (~70.4 GiB peak per its card), the renderer (1.6 GiB on VM 1), and"
+    echo "         physics will share GPU 0's 80 GiB (untested). If it runs out of memory, use a 2-GPU VM."
+  fi
   [[ -n "${HF_TOKEN:-}" ]] || fail "HF_TOKEN is not set (create one at https://huggingface.co/settings/tokens)"
-  echo "OK: driver $driver_major, GPU ${gpu_memory} MiB"
+  echo "OK: driver $driver_major, $gpu_count GPU(s), GPU 0 ${gpu_memory} MiB; MODEL=$MODEL, GPU_LAYOUT=$GPU_LAYOUT"
 }
 
 free_gb() {
@@ -130,6 +167,8 @@ export DATA_DIR="\${DATA_DIR:-$DATA_DIR}"
 export WORKDIR="\${WORKDIR:-$WORKDIR}"
 export HF_HOME="\${HF_HOME:-$HF_HOME}"
 export UV_CACHE_DIR="\${UV_CACHE_DIR:-$UV_CACHE_DIR}"
+export MODEL="\${MODEL:-$MODEL}"
+export GPU_LAYOUT="\${GPU_LAYOUT:-$GPU_LAYOUT}"
 ENV
   echo "OK: DATA_DIR=$DATA_DIR (${free} GB free)"
 }
@@ -255,11 +294,11 @@ EOF
 }
 
 download_models() {
-  step "Caching the model files the driver loads, then checking they load offline"
-  # Alpamayo 1.5 in full; only config/processor files of Cosmos-Reason2-8B (its
-  # weights are inside the Alpamayo checkpoint) and of the Qwen processor. Fails if
-  # the checkpoint names an unexpected base VLM, or if anything would need a download.
-  "$ALPASIM/.venv/bin/python" "$REPO/scripts/prepare_hf_cache.py" || fail "model download or offline check failed"
+  step "Caching the files $MODEL's driver loads, then checking they load offline"
+  # Alpamayo 1.5: its checkpoint, plus config/processor files of Cosmos-Reason2-8B and
+  # two Qwen3-VL repos. Alpamayo 2 Super: its checkpoint only (71.6 GB; the check loads
+  # it on the GPU). Fails if anything would need a download.
+  "$ALPASIM/.venv/bin/python" "$REPO/scripts/prepare_hf_cache.py" "$MODEL" || fail "model download or offline check failed"
 }
 
 scene_ids() {
@@ -278,11 +317,12 @@ prepare_scenes_and_image() {
   export VLA_ON_EDGE_GIT_COMMIT  # checked by check_config below
   rm -rf "$prepare_dir"
   (cd "$ALPASIM" && VLA_ON_EDGE_REPO="$REPO" uv run --no-sync alpasim_wizard \
-      deploy=local topology=1gpu driver=alpamayo1_5 \
-      "hydra.searchpath=[file://$REPO/configs/alpasim]" +vla_on_edge=alpamayo1_5 \
+      deploy=local topology="$TOPOLOGY" driver="$ALPASIM_DRIVER" \
+      "hydra.searchpath=[file://$REPO/configs/alpasim]" "+vla_on_edge=$MODEL" \
       wizard.run_method=NONE wizard.log_dir="$prepare_dir" "scenes.scene_ids=[$(scene_ids)]") \
     || fail "AlpaSim's wizard could not prepare the run (scene download or config error; see above)"
-  "$ALPASIM/.venv/bin/python" -m alpasim_vla_on_edge.check_config "$prepare_dir" || fail "generated configs are wrong"
+  "$ALPASIM/.venv/bin/python" -m alpasim_vla_on_edge.check_config "$prepare_dir" --model "$MODEL" --layout "$GPU_LAYOUT" \
+    || fail "generated configs are wrong"
 
   step "Pulling prebuilt images (NVIDIA's NuRec renderer, Prometheus)"
   docker compose -f "$prepare_dir/docker-compose.yaml" pull --ignore-buildable < /dev/null \
@@ -305,8 +345,8 @@ main() {
   download_models
   prepare_scenes_and_image
   echo
-  echo "SETUP DONE. Everything is under $DATA_DIR."
-  echo "Next: cd $REPO && bash scripts/run_stages.sh 1   (then 2, then 3)"
+  echo "SETUP DONE for $MODEL ($GPU_LAYOUT). Everything is under $DATA_DIR."
+  echo "Next: cd $REPO && bash scripts/run_stages.sh 1   (then 2, then 3; MODEL and GPU_LAYOUT come from vm.env)"
   echo "If $DATA_DIR is an ephemeral disk, stopping the VM wipes it: copy results off first."
 }
 

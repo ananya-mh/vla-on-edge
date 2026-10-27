@@ -59,8 +59,9 @@ stdin = os.fstat(0)
     "compose_env": [os.environ.get("COMPOSE_MENU"), os.environ.get("COMPOSE_ANSI")],
     "stdin_is_dev_null": (stdin.st_dev, stdin.st_ino) == (devnull.st_dev, devnull.st_ino),
 }}))
-if "+vla_on_edge=alpamayo1_5" in overrides:
-    write_plugin_logs(log_dir, STORIES[1], random.Random(0))
+wrapper = [o.split("=", 1)[1] for o in overrides if o.startswith("+vla_on_edge=") and o != "+vla_on_edge=builtin_offline"]
+if wrapper:
+    write_plugin_logs(log_dir, STORIES[1], random.Random(0), model=wrapper[0])
 '''
 
 pytestmark = pytest.mark.skipif(not ALPASIM_PYTHON.exists(), reason="local AlpaSim environment not set up")
@@ -144,3 +145,24 @@ def test_stage_3_without_stage_2_says_no_estimate(stub_env):
     completed = run_stage("3", {**stub_env, "RUN_ID": "fresh"})
     assert completed.returncode == 0, completed.stderr
     assert "No stage 2 timing" in completed.stdout
+
+
+def test_alpamayo2_super_on_two_gpus_uses_its_driver_wrapper_and_topology(stub_env):
+    env = {**stub_env, "MODEL": "alpamayo2_super", "GPU_LAYOUT": "2gpu"}
+    results = Path(stub_env["RESULTS_ROOT"]) / "vm_test"
+    smoke = load_alpasim_scenes(CONFIG_DIR)["smoke_scene"]
+    for stage in ("1", "2"):
+        completed = run_stage(stage, env)
+        assert completed.returncode == 0, completed.stdout + completed.stderr
+    stage1_call = json.loads((results / "stage1/alpamayo2_super_builtin" / smoke / "stub_call.json").read_text())
+    stage2_call = json.loads((results / "stage2/alpamayo2_super" / smoke / "stub_call.json").read_text())
+    for call in (stage1_call, stage2_call):
+        assert "driver=alpamayo2" in call["overrides"] and "topology=vla_on_edge_2gpu" in call["overrides"]
+    assert "+vla_on_edge=builtin_offline" in stage1_call["overrides"]
+    assert "+vla_on_edge=alpamayo2_super" in stage2_call["overrides"]
+    assert "model=alpamayo2_super gpu_layout=2gpu" in (results / "host_versions.txt").read_text()
+
+
+def test_an_unknown_model_is_rejected(stub_env):
+    completed = run_stage("1", {**stub_env, "MODEL": "alpamayo3"})
+    assert completed.returncode != 0 and "unknown MODEL=alpamayo3" in completed.stderr

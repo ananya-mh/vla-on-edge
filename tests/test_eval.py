@@ -88,3 +88,10 @@ def test_check_run_detects_a_clock_mismatch(stage_dir):
     shifted = (first + 10**12, last + 10**12)  # a different clock origin
     problems = check_plugin_logs(log_dir, shifted, "alpamayo1_5")
     assert any("clocks may differ" in problem for problem in problems)
+
+
+def test_check_run_detects_logs_from_another_model(stage_dir):
+    log_dir = scene_dirs(stage_dir)[0]  # written as alpamayo1_5
+    _, time_range = check_alpasim_outputs(log_dir)
+    problems = check_plugin_logs(log_dir, time_range, "alpamayo2_super")
+    assert problems == ["some records are not from alpamayo2_super (wrong wrapper?)"]

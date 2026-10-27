@@ -196,7 +196,7 @@ def write_alpasim_outputs(log_dir: Path, scene_id: str, story: dict) -> None:
     (aggregate_dir / "results-summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True))
 
 
-def plugin_record(story: dict, step: int, rng: random.Random) -> dict:
+def plugin_record(story: dict, step: int, rng: random.Random, model: str = "alpamayo1_5") -> dict:
     """One fake plugin step record, shaped like LoggedModel.build_record."""
     t_s = step * STEP_US / 1e6
     acceleration = 0.4 * math.sin(t_s)
@@ -209,7 +209,7 @@ def plugin_record(story: dict, step: int, rng: random.Random) -> dict:
     waypoints = [{"x": story["speed"] * 0.1 * (i + 1), "y": 0.0, "t": round(0.1 * (i + 1), 1), "z": 0.0,
                   "rotation": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]} for i in range(64)]
     return {
-        "log_format_version": LOG_FORMAT_VERSION, "model": "alpamayo1_5", "wall_time_s": 1.8e9 + step,
+        "log_format_version": LOG_FORMAT_VERSION, "model": model, "wall_time_s": 1.8e9 + step,
         "sim_time_us": START_US + step * STEP_US, "inference_seed": step, "command": "STRAIGHT",
         "ego_speed_mps": story["speed"], "ego_acceleration_mps2": acceleration,
         "executed_action": {"waypoints": waypoints}, "validation_violations": violations,
@@ -220,13 +220,13 @@ def plugin_record(story: dict, step: int, rng: random.Random) -> dict:
     }
 
 
-def write_plugin_logs(log_dir: Path, story: dict, rng: random.Random) -> None:
+def write_plugin_logs(log_dir: Path, story: dict, rng: random.Random, model: str = "alpamayo1_5") -> None:
     """Write vla_on_edge/steps.jsonl for the driven (post force-GT) steps of one scene."""
     plugin_dir = log_dir / "vla_on_edge"
     plugin_dir.mkdir()
     first_driven_step = FORCE_GT_US // STEP_US
     for step in range(first_driven_step, N_STEPS):
-        append_jsonl(plugin_dir / "steps.jsonl", plugin_record(story, step, rng))
+        append_jsonl(plugin_dir / "steps.jsonl", plugin_record(story, step, rng, model))
 
 
 def write_fake_run(stage_dir: Path, model: str = "alpamayo1_5", seed: int = 0) -> Path:
@@ -236,7 +236,7 @@ def write_fake_run(stage_dir: Path, model: str = "alpamayo1_5", seed: int = 0) -
     for scene_id, story in zip(scene_ids, STORIES):
         log_dir = stage_dir / model / scene_id
         write_alpasim_outputs(log_dir, scene_id, story)
-        write_plugin_logs(log_dir, story, rng)
+        write_plugin_logs(log_dir, story, rng, model)
     return stage_dir
 
 
