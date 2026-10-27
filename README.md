@@ -36,6 +36,9 @@ bash scripts/run_stages.sh 2     # the same scene through our logging plugin: do
 bash scripts/run_stages.sh 3     # all 8 scenes through the plugin, then the report
 ```
 
+`bash scripts/run_stages.sh experiment` runs one labelled experiment instead: AlpaSim's own Alpamayo 2
+comparison settings (6 cameras, 6 candidates) on one scene, kept in its own folder (see the script's header).
+
 `MODEL` is `alpamayo2_super` or `alpamayo1_5`. The GPU layout is picked from the
 number of GPUs; set `GPU_LAYOUT=1gpu` or `2gpu` to choose it yourself. Each stage
 stops at the first problem and says what to fix. To keep one results folder across

@@ -2,9 +2,10 @@
 
 Run with AlpaSim's Python on a wizard log dir made with `wizard.run_method=NONE`
 (or `deploy=docker_build_only`):
-    python -m alpasim_vla_on_edge.check_config <log_dir> [--model M] [--layout L] [--builtin]
+    python -m alpasim_vla_on_edge.check_config <log_dir> [--model M] [--layout L] [--builtin] [--experiment E]
 M is alpamayo1_5 (default) or alpamayo2_super; L is 1gpu (default) or 2gpu;
---builtin checks a stage 1 run (AlpaSim's own driver) instead of our wrapper.
+--builtin checks a stage 1 run (AlpaSim's own driver) instead of our wrapper;
+--experiment checks a labelled experiment's settings (see EXPERIMENTS).
 
 It repeats the two steps the driver does at startup that can fail on config: the
 strict schema merge of driver-config.yaml and the plugin registry lookup of
@@ -119,7 +120,53 @@ def check_video_layouts(log_dir: Path) -> list[str]:
     return []
 
 
-def check_run(log_dir: Path, model: str, layout: str, builtin: bool) -> list[str]:
+# Labelled experiments (configs/alpasim/vla_on_edge_experiment/<name>.yaml): the driver
+# settings and cameras each must produce.
+COMPARISON_6CAM_CAMERAS = [
+    "camera_cross_left_120fov", "camera_front_wide_120fov", "camera_cross_right_120fov",
+    "camera_rear_left_70fov", "camera_rear_right_70fov", "camera_front_tele_30fov",
+]
+EXPERIMENTS = {
+    "alpamayo2_comparison_6cam": {
+        "use_cameras": COMPARISON_6CAM_CAMERAS,
+        "num_trajectory_samples": 6,
+        "trajectory_candidate_microbatch_size": 3,
+        "selection_strategy": "CLOSEST_LATERAL",
+        "environment": "PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True",
+    },
+}
+
+
+def check_experiment(log_dir: Path, driver: dict, experiment: str, microbatch: int | None = None) -> list[str]:
+    """The run uses exactly the experiment's driver settings, cameras, and allocator setting.
+
+    `microbatch` overrides the expected candidate microbatch size (run_stages.sh's
+    EXPERIMENT_MICROBATCH, the out-of-memory fallback); everything else must match.
+    """
+    expected = dict(EXPERIMENTS[experiment])
+    if microbatch is not None:
+        expected["trajectory_candidate_microbatch_size"] = microbatch
+    config = yaml.safe_load((log_dir / "driver-config.yaml").read_text())
+    rendered = yaml.safe_load((log_dir / "wizard-config.yaml").read_text())["runtime"]["simulation_config"]["cameras"]
+    found = {
+        "use_cameras": config["inference"]["use_cameras"],
+        "num_trajectory_samples": config["model"]["num_trajectory_samples"],
+        "trajectory_candidate_microbatch_size": config["model"]["trajectory_candidate_microbatch_size"],
+        "selection_strategy": config["model"]["trajectory_selection"]["strategy"],
+    }
+    problems = [f"{experiment}: {key} is {found[key]!r}, expected {value!r}"
+                for key, value in expected.items() if key in found and found[key] != value]
+    missing = set(expected["use_cameras"]) - {camera["logical_id"] for camera in rendered}
+    if missing:
+        problems.append(f"{experiment}: the renderer is not asked for {sorted(missing)}")
+    if expected["environment"] not in driver.get("environment", []):
+        problems.append(f"{experiment}: {expected['environment']} is not set in the driver container")
+    return problems
+
+
+def check_run(
+    log_dir: Path, model: str, layout: str, builtin: bool, experiment: str | None = None, microbatch: int | None = None
+) -> list[str]:
     """Return every problem with the generated configs (empty if fine)."""
     wrapper_type, builtin_type = MODEL_TYPES[model]
     problems = check_driver_config(log_dir, builtin_type if builtin else wrapper_type)
@@ -132,6 +179,8 @@ def check_run(log_dir: Path, model: str, layout: str, builtin: bool) -> list[str
     if not builtin:
         problems += check_wrapper_driver_service(driver)
         problems += check_video_layouts(log_dir)
+    if experiment is not None:
+        problems += check_experiment(log_dir, driver, experiment, microbatch)
     return problems
 
 
@@ -142,8 +191,10 @@ def main() -> None:
     parser.add_argument("--model", choices=sorted(MODEL_TYPES), default="alpamayo1_5")
     parser.add_argument("--layout", choices=sorted(GPU_LAYOUTS), default="1gpu")
     parser.add_argument("--builtin", action="store_true", help="AlpaSim's own driver (stage 1), not our wrapper")
+    parser.add_argument("--experiment", choices=sorted(EXPERIMENTS), help="a labelled experiment's settings")
+    parser.add_argument("--microbatch", type=int, help="expected candidate microbatch size, if not the experiment's")
     args = parser.parse_args()
-    problems = check_run(args.log_dir, args.model, args.layout, args.builtin)
+    problems = check_run(args.log_dir, args.model, args.layout, args.builtin, args.experiment, args.microbatch)
     for problem in problems:
         print(f"PROBLEM: {problem}")
     if problems:
@@ -152,7 +203,8 @@ def main() -> None:
     if args.builtin:
         print(f"OK: {args.log_dir} runs AlpaSim's {builtin_type} offline against the mounted cache ({args.layout})")
     else:
-        print(f"OK: {args.log_dir} runs {wrapper_type} with our logging, offline ({args.layout})")
+        label = f", experiment {args.experiment}" if args.experiment else ""
+        print(f"OK: {args.log_dir} runs {wrapper_type} with our logging, offline ({args.layout}{label})")
 
 
 if __name__ == "__main__":

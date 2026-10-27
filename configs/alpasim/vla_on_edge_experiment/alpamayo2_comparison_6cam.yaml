@@ -1,0 +1,80 @@
+# @package _global_
+# Labelled experiment, not the benchmark default: AlpaSim's own Alpamayo 2 comparison
+# settings (third_party/alpasim/src/wizard/configs/exp/presets/alpamayo2_comparison_6cam.yaml)
+# on top of our wrapper (vla_on_edge/alpamayo2_super.yaml). Selected by
+# scripts/run_stages.sh experiment, with +vla_on_edge_experiment=alpamayo2_comparison_6cam
+# after +vla_on_edge=alpamayo2_super, so these values win.
+#
+# Taken from the preset: six cameras (the public rig profile [0, 1, 2, 3, 5, 6]; rear
+# tele is absent from the public data), six trajectory candidates sampled three at a
+# time, CLOSEST_LATERAL selection (drive the candidate closest sideways to the
+# previous plan), and PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True (less memory
+# fragmentation). Left out on purpose, so only the model settings differ from our
+# default runs: n_rollouts 3 (we run one rollout per wizard run; repeat the run
+# instead), route_generator_type NONE (our runs keep AlpaSim's MAP default), and the
+# Slurm-only wizard options. The preset's other environment variables are already
+# set (HF_HUB_OFFLINE) or AlpaSim's defaults (HF_HOME).
+
+runtime:
+  simulation_config:
+    cameras:
+      - logical_id: camera_cross_left_120fov
+        height: 1080
+        width: 1900
+        frame_interval_us: 100_000
+        shutter_duration_us: 30_000
+      - logical_id: camera_front_wide_120fov
+        height: 1080
+        width: 1900
+        frame_interval_us: 100_000
+        shutter_duration_us: 30_000
+      - logical_id: camera_cross_right_120fov
+        height: 1080
+        width: 1900
+        frame_interval_us: 100_000
+        shutter_duration_us: 30_000
+      - logical_id: camera_rear_left_70fov
+        height: 1080
+        width: 1900
+        frame_interval_us: 100_000
+        shutter_duration_us: 30_000
+      - logical_id: camera_rear_right_70fov
+        height: 1080
+        width: 1900
+        frame_interval_us: 100_000
+        shutter_duration_us: 30_000
+      - logical_id: camera_front_tele_30fov
+        height: 1080
+        width: 1900
+        frame_interval_us: 100_000
+        shutter_duration_us: 30_000
+
+driver:
+  inference:
+    use_cameras:
+      - camera_cross_left_120fov
+      - camera_front_wide_120fov
+      - camera_cross_right_120fov
+      - camera_rear_left_70fov
+      - camera_rear_right_70fov
+      - camera_front_tele_30fov
+  model:
+    num_trajectory_samples: 6
+    trajectory_candidate_microbatch_size: 3
+    trajectory_selection:
+      strategy: CLOSEST_LATERAL
+      max_num_distance_points: 64
+      skip_first_n_distance_points: 0
+
+services:
+  driver:
+    # Hydra replaces lists, so this restates wrapper.yaml's driver environment and adds
+    # the allocator setting. check_config checks both are present.
+    environments:
+      - "VLA_ON_EDGE_LOG_DIR=/mnt/output/vla_on_edge"
+      - "VLA_ON_EDGE_CONFIG_DIR=/mnt/vla_on_edge/configs"
+      - "HF_HUB_OFFLINE=1"
+      - "VLA_ON_EDGE_GIT_COMMIT=${oc.env:VLA_ON_EDGE_GIT_COMMIT,unknown}"
+      - "VLA_ON_EDGE_GIT_DIRTY=${oc.env:VLA_ON_EDGE_GIT_DIRTY,unknown}"
+      - "VLA_ON_EDGE_COMPOSE_VERSION=${oc.env:VLA_ON_EDGE_COMPOSE_VERSION,unknown}"
+      - "PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True"

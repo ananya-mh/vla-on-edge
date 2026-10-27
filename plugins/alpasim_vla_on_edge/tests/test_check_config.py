@@ -18,13 +18,13 @@ ALPASIM = REPO / "third_party/alpasim"
 TOPOLOGIES = {"1gpu": "1gpu", "2gpu": "vla_on_edge_2gpu"}  # our layout name -> AlpaSim topology option
 
 
-def generate_configs(log_dir: Path, driver: str, overrides: str, layout: str) -> Path:
+def generate_configs(log_dir: Path, driver: str, overrides: str, layout: str, *extra: str) -> Path:
     """Run AlpaSim's wizard in generate-only mode with our Hydra overrides."""
     command = [
         shutil.which("uv"), "run", "--no-sync", "alpasim_wizard", "deploy=docker_build_only",
         f"topology={TOPOLOGIES[layout]}", f"driver={driver}",
         f"hydra.searchpath=[file://{REPO}/configs/alpasim]", f"+vla_on_edge={overrides}",
-        "wizard.run_method=NONE", f"wizard.log_dir={log_dir}",
+        *extra, "wizard.run_method=NONE", f"wizard.log_dir={log_dir}",
     ]
     environment = {**os.environ, "VLA_ON_EDGE_REPO": str(REPO), "VLA_ON_EDGE_GIT_COMMIT": "test"}
     completed = subprocess.run(command, cwd=ALPASIM, env=environment, stdin=subprocess.DEVNULL,
@@ -80,3 +80,20 @@ def test_wrapper_runs_render_the_reasoning_overlay_and_stage_1_does_not(tmp_path
     builtin = generate_configs(tmp_path / "builtin", "alpamayo2", "builtin_offline", "1gpu")
     assert layouts(wrapper) == ["DEFAULT", "REASONING_OVERLAY"]
     assert layouts(builtin) == ["DEFAULT"]
+
+
+@needs_wizard
+def test_the_comparison_experiment_gets_alpasims_preset_settings(tmp_path):
+    experiment = generate_configs(tmp_path / "experiment", "alpamayo2", "alpamayo2_super", "2gpu",
+                                  "+vla_on_edge_experiment=alpamayo2_comparison_6cam")
+    assert check_run(experiment, "alpamayo2_super", "2gpu", False, "alpamayo2_comparison_6cam") == []
+    default = generate_configs(tmp_path / "default", "alpamayo2", "alpamayo2_super", "2gpu")
+    problems = check_run(default, "alpamayo2_super", "2gpu", False, "alpamayo2_comparison_6cam")
+    assert any("num_trajectory_samples is 1" in problem for problem in problems)
+    assert any("expandable_segments" in problem for problem in problems)
+    # The microbatch fallback is checked as such, everything else unchanged.
+    smaller = generate_configs(tmp_path / "smaller", "alpamayo2", "alpamayo2_super", "2gpu",
+                               "+vla_on_edge_experiment=alpamayo2_comparison_6cam",
+                               "driver.model.trajectory_candidate_microbatch_size=1")
+    assert check_run(smaller, "alpamayo2_super", "2gpu", False, "alpamayo2_comparison_6cam", microbatch=1) == []
+    assert check_run(smaller, "alpamayo2_super", "2gpu", False, "alpamayo2_comparison_6cam") != []

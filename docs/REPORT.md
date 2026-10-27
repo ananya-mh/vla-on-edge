@@ -72,6 +72,24 @@ per scene is not enough to rank models. See [Limitations](#limitations).
 
 **[TODO]** Charts: score by scene, latency distribution, validator flags (from the generated report's `charts/`).
 
+### Experiment: AlpaSim's Alpamayo 2 comparison settings (not the benchmark default)
+
+The benchmark uses AlpaSim's default driver settings: 4 cameras, one trajectory
+sample, always the first one. NVIDIA's own Alpamayo 2 comparison preset instead
+uses six cameras (adding rear left and right), six candidates per step, and
+`CLOSEST_LATERAL`. That rule drives the candidate closest sideways to the previous
+plan, which should steady the plan-to-plan swings we saw. One run on the stage 2
+crash scene, through our plugin (`run_stages.sh experiment`):
+
+| | Default (stage 2) | Comparison settings |
+|---|---|---|
+| Scene score | 0.00 | **[TODO]** |
+| Latency per decision, p50 / p90 (n) | 3.16 / 4.17 s (182) | **[TODO]** |
+| GPU 0 peak, driver | 69.5 GiB | **[TODO]** |
+| GPU 1 peak, renderer + physics | 9.3 GiB | **[TODO]** |
+
+One run is one random draw, like every other single run here.
+
 ## Notable drives
 
 **Stage 1, scene `clipgt-01d503d4…`: perfect score, but the car left the recorded path.**

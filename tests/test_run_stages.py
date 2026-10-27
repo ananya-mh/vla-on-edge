@@ -45,6 +45,11 @@ if os.environ.get("HANG_SCENE") == scene:
     log_dir.mkdir(parents=True)
     (log_dir / "stub.pid").write_text(str(os.getpid()))
     time.sleep(600)  # killed by run_stages.sh's timeout
+if os.environ.get("OOM_SCENE") == scene:
+    import time
+    log_dir.mkdir(parents=True)
+    print("driver-0-1  | torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.00 GiB", flush=True)
+    time.sleep(600)  # a crashed driver can leave the run waiting; run_stages.sh must stop it
 if os.environ.get("FAIL_SCENE") == scene:
     (log_dir / "txt-logs").mkdir(parents=True)
     (log_dir / "txt-logs" / "runtime.log").write_text("simulated failure")
@@ -166,3 +171,54 @@ def test_alpamayo2_super_on_two_gpus_uses_its_driver_wrapper_and_topology(stub_e
 def test_an_unknown_model_is_rejected(stub_env):
     completed = run_stage("1", {**stub_env, "MODEL": "alpamayo3"})
     assert completed.returncode != 0 and "unknown MODEL=alpamayo3" in completed.stderr
+
+
+def experiment_env(stub_env, **extra):
+    return {**stub_env, "MODEL": "alpamayo2_super", "GPU_LAYOUT": "2gpu", **extra}
+
+
+def test_the_experiment_runs_separately_and_is_labelled(stub_env):
+    results = Path(stub_env["RESULTS_ROOT"]) / "vm_test"
+    smoke = load_alpasim_scenes(CONFIG_DIR)["smoke_scene"]
+    completed = run_stage("experiment", experiment_env(stub_env))
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert "timeout 7200 s" in completed.stdout
+    stage_dir = results / "experiment_alpamayo2_comparison_6cam"
+    call = json.loads((stage_dir / "alpamayo2_super" / smoke / "stub_call.json").read_text())
+    assert "+vla_on_edge=alpamayo2_super" in call["overrides"]
+    assert call["overrides"][-1] == "+vla_on_edge_experiment=alpamayo2_comparison_6cam"  # last, so it wins
+    assert (stage_dir / "alpamayo2_super" / smoke / "console.log").exists()
+    report = (stage_dir / "report.md").read_text()
+    assert report.startswith("# Driving benchmark report\n\n**Experiment, not the benchmark default:**")
+    assert not (results / "stage2").exists()  # nothing written into the default stages
+
+
+def test_the_experiment_needs_alpamayo2_super_on_two_gpus(stub_env):
+    completed = run_stage("experiment", {**experiment_env(stub_env), "GPU_LAYOUT": "1gpu"})
+    assert completed.returncode != 0 and "needs GPU_LAYOUT=2gpu" in completed.stderr
+    completed = run_stage("experiment", {**experiment_env(stub_env), "MODEL": "alpamayo1_5"})
+    assert completed.returncode != 0 and "is for MODEL=alpamayo2_super" in completed.stderr
+
+
+def test_a_smaller_microbatch_is_its_own_labelled_run(stub_env):
+    completed = run_stage("experiment", experiment_env(stub_env, EXPERIMENT_MICROBATCH="1"))
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    stage_dir = Path(stub_env["RESULTS_ROOT"]) / "vm_test/experiment_alpamayo2_comparison_6cam_mb1"
+    smoke = load_alpasim_scenes(CONFIG_DIR)["smoke_scene"]
+    call = json.loads((stage_dir / "alpamayo2_super" / smoke / "stub_call.json").read_text())
+    assert "driver.model.trajectory_candidate_microbatch_size=1" in call["overrides"]
+    assert "sampled 1 at a time" in (stage_dir / "EXPERIMENT.md").read_text()
+
+
+def test_out_of_memory_stops_the_run_and_says_what_to_try(stub_env):
+    import time
+
+    smoke = load_alpasim_scenes(CONFIG_DIR)["smoke_scene"]
+    start = time.monotonic()
+    completed = run_stage("experiment", experiment_env(stub_env, OOM_SCENE=smoke))
+    assert time.monotonic() - start < 120  # not the 7200 s timeout
+    assert completed.returncode != 0
+    assert "a GPU ran out of memory" in completed.stderr and "EXPERIMENT_MICROBATCH=2" in completed.stderr
+    assert "driver-0-1  | torch.OutOfMemoryError" in completed.stderr  # the offending line, so you see which GPU
+    console = Path(stub_env["RESULTS_ROOT"]) / "vm_test/experiment_alpamayo2_comparison_6cam/alpamayo2_super" / smoke / "console.log"
+    assert "CUDA out of memory" in console.read_text()

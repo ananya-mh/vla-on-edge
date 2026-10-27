@@ -7,13 +7,23 @@
 #      then build the report
 # Each scene is its own AlpaSim run (our logs cannot tell rollouts apart).
 #
-# Usage: [MODEL=...] [GPU_LAYOUT=...] bash scripts/run_stages.sh 1|2|3|all   (after scripts/setup_vm.sh)
+#   experiment: one labelled experiment (not the benchmark default) on one scene through
+#      the wrapper, kept in its own folder: results/vm_<RUN_ID>/experiment_<name>/
+#
+# Usage: [MODEL=...] [GPU_LAYOUT=...] bash scripts/run_stages.sh 1|2|3|all|experiment   (after scripts/setup_vm.sh)
 #   MODEL       alpamayo1_5 | alpamayo2_super (default: the one setup_vm.sh prepared,
 #               from vm.env; else alpamayo1_5)
 #   GPU_LAYOUT  1gpu: every service on GPU 0 (AlpaSim's topology/1gpu.yaml)
 #               2gpu: the model alone on GPU 0, renderer and physics on GPU 1
 #                     (configs/alpasim/topology/vla_on_edge_2gpu.yaml)
 #               (default: from vm.env; else 2gpu if nvidia-smi lists 2+ GPUs, otherwise 1gpu)
+#   For `experiment`:
+#   EXPERIMENT            alpamayo2_comparison_6cam (the only one; AlpaSim's own Alpamayo 2
+#                         comparison settings: configs/alpasim/vla_on_edge_experiment/)
+#   EXPERIMENT_SCENE      the scene (default: the smoke scene from configs/scenarios.yaml)
+#   EXPERIMENT_MICROBATCH candidates sampled per model call (default: the experiment's, 3);
+#                         lower it if the driver runs out of GPU memory
+#   SCENE_TIMEOUT_S defaults to 7200 s for `experiment`.
 # Results: results/vm_<RUN_ID>/stage<N>/<model>/<scene>/ (copied after each scene,
 # also on failure), stage reports, and results/report.md after stage 3.
 # Set RUN_ID to reuse one results folder across separate stage invocations (stage 3
@@ -39,7 +49,12 @@ WORK="${WORKDIR:-$HOME/bench}/runs/$RUN_ID"   # AlpaSim writes here (large)
 RESULTS_ROOT="${RESULTS_ROOT:-$REPO/results}"
 RESULTS="$RESULTS_ROOT/vm_$RUN_ID"            # copied here after each scene
 PYTHON="$REPO/.venv/bin/python"
-SCENE_TIMEOUT_S="${SCENE_TIMEOUT_S:-3600}"
+# Per-scene timeout: 3600 s, or 7200 s for `experiment` (slower: 6 candidates, 6 cameras).
+if [[ "${1:-}" == experiment ]]; then
+  SCENE_TIMEOUT_S="${SCENE_TIMEOUT_S:-7200}"
+else
+  SCENE_TIMEOUT_S="${SCENE_TIMEOUT_S:-3600}"
+fi
 MODEL="${MODEL:-alpamayo1_5}"
 # AlpaSim's driver config for each models.yaml key (src/wizard/configs/driver/); our
 # wrapper overrides are configs/alpasim/vla_on_edge/<MODEL>.yaml.
@@ -61,6 +76,9 @@ esac
 # "Created" with its interactive menu and ANSI output on, so turn both off (and the
 # wizard gets stdin from /dev/null in run_alpasim).
 export COMPOSE_MENU=false COMPOSE_ANSI=never
+# Lines in a run's console output that mean a GPU ran out of memory (PyTorch in the
+# driver, or CUDA in the renderer); run_with_timeout stops the run when one appears.
+OOM_PATTERN='CUDA out of memory|OutOfMemoryError|CUDA_ERROR_OUT_OF_MEMORY|cudaErrorMemoryAllocation'
 
 # The data disk may be ephemeral (wiped when the VM stops), so say how to copy results off.
 copy_off_reminder() {
@@ -108,31 +126,43 @@ print($1)"
 }
 
 # run_alpasim <log_dir> <scene_id> [extra Hydra overrides...]
+# The wizard's console output (all containers' logs, which AlpaSim does not save
+# elsewhere, e.g. a driver crash) is also written to <log_dir>.console.log.
 run_alpasim() {
   local log_dir="$1" scene="$2"
   shift 2
   (cd "$ALPASIM" && VLA_ON_EDGE_REPO="$REPO" uv run --no-sync alpasim_wizard \
       deploy=local topology="$TOPOLOGY" driver="$ALPASIM_DRIVER" \
-      wizard.log_dir="$log_dir" "scenes.scene_ids=[$scene]" "$@" < /dev/null)
+      wizard.log_dir="$log_dir" "scenes.scene_ids=[$scene]" "$@" < /dev/null) 2>&1 | tee "$log_dir.console.log"
 }
 
 # run_with_timeout <seconds> <log_dir> <command...>
-# Runs the command in its own process group. On timeout, stops that run's containers
-# (killing only the wizard would leave them holding the GPU), then the whole group,
-# and returns 124.
+# Runs the command in its own process group. On timeout (returns 124), or when the
+# console log shows a GPU out-of-memory error (returns 125; a crashed driver can
+# otherwise leave the run waiting until the timeout), stops that run's containers
+# (killing only the wizard would leave them holding the GPU), then the whole group.
 run_with_timeout() {
   local seconds="$1" log_dir="$2"
   shift 2
-  local marker="$log_dir.timed_out" pid watcher status=0
-  rm -f "$marker"
+  local marker="$log_dir.timed_out" oom_marker="$log_dir.out_of_memory" pid watcher status=0
+  rm -f "$marker" "$oom_marker"
   set -m  # job control: the background job gets its own process group
   "$@" &
   pid=$!
   set +m
   (
-    sleep "$seconds"
-    touch "$marker"
-    echo "TIMEOUT after ${seconds} s: stopping the run" >&2
+    waited=0
+    while (( waited < seconds )); do
+      step=$(( seconds - waited < 5 ? seconds - waited : 5 ))
+      sleep "$step"
+      waited=$(( waited + step ))
+      if grep -qiE "$OOM_PATTERN" "$log_dir.console.log" 2> /dev/null; then
+        touch "$oom_marker"
+        echo "OUT OF GPU MEMORY: stopping the run" >&2
+        break
+      fi
+    done
+    [[ -f "$oom_marker" ]] || { touch "$marker"; echo "TIMEOUT after ${seconds} s: stopping the run" >&2; }
     if [[ -f "$log_dir/docker-compose.yaml" ]]; then
       docker compose -f "$log_dir/docker-compose.yaml" down --timeout 30 > /dev/null 2>&1 || true
     fi
@@ -143,6 +173,10 @@ run_with_timeout() {
   pkill -P "$watcher" 2> /dev/null || true  # its sleep
   kill "$watcher" 2> /dev/null || true
   wait "$watcher" 2> /dev/null || true
+  if [[ -f "$oom_marker" ]] || grep -qiE "$OOM_PATTERN" "$log_dir.console.log" 2> /dev/null; then
+    rm -f "$marker" "$oom_marker"
+    return 125
+  fi
   if [[ -f "$marker" ]]; then
     rm -f "$marker"
     return 124
@@ -186,24 +220,40 @@ BUILTIN_OVERRIDES=("hydra.searchpath=[file://$REPO/configs/alpasim]" "+vla_on_ed
 
 # check_configs <stage> <scene> <extra check_config flags> <Hydra overrides...>
 # Generates the run's configs without running and checks them (model, GPU layout,
-# offline cache, our wrapper's mounts) before GPU time is spent.
+# offline cache, our wrapper's mounts, any experiment's settings) before GPU time is spent.
 check_configs() {
   local stage="$1" scene="$2" check_flags="$3"
   shift 3
   local log_dir="$WORK/${stage}_config_check"
-  run_alpasim "$log_dir" "$scene" "$@" wizard.run_method=NONE || fail "config generation failed"
-  # shellcheck disable=SC2086  # check_flags is empty or one flag
+  mkdir -p "$WORK"
+  run_alpasim "$log_dir" "$scene" "$@" wizard.run_method=NONE > /dev/null || fail "config generation failed (see $log_dir.console.log)"
+  # shellcheck disable=SC2086  # check_flags holds whole flags, split on spaces on purpose
   "$ALPASIM/.venv/bin/python" -m alpasim_vla_on_edge.check_config "$log_dir" --model "$MODEL" --layout "$GPU_LAYOUT" \
     $check_flags || fail "$stage configs are wrong"
 }
 
 # copy_results <log_dir> <stage> <model> <scene>
 copy_results() {
-  [[ -d "$1" ]] || { echo "no outputs to copy from $1"; return 0; }
   local destination="$RESULTS/$2/$3/$4"
+  if [[ -f "$1.console.log" ]]; then
+    mkdir -p "$destination"
+    cp "$1.console.log" "$destination/console.log"
+  fi
+  [[ -d "$1" ]] || { echo "no outputs to copy from $1"; return 0; }
   mkdir -p "$destination"
   cp -a "$1/." "$destination/"
   echo "copied to $destination"
+}
+
+# Say which GPU ran out of memory and what to try, then stop.
+fail_out_of_memory() {
+  local log_dir="$1" destination="$2"
+  echo "Out-of-memory lines from the console log:" >&2
+  grep -iE "$OOM_PATTERN" "$log_dir.console.log" 2> /dev/null | head -3 >&2 || true
+  fail "a GPU ran out of memory (console log: $destination/console.log; peaks: $RESULTS/gpu_memory_peaks.json). \
+If it was the driver (lines start with driver-): rerun with EXPERIMENT_MICROBATCH=2, then 1 (same 6 candidates, \
+sampled in smaller batches: less memory, slower). If it was the renderer: that is GPU 1, check what else uses it. \
+Don't switch to GPU_LAYOUT=1gpu: the model alone used 69.5 GiB of GPU 0 with 4 cameras and 1 candidate."
 }
 
 # run_scene <stage> <model> <scene> <check_run flags> [extra Hydra overrides...]
@@ -215,7 +265,10 @@ run_scene() {
   local status=0 start=$SECONDS
   mkdir -p "$(dirname "$log_dir")"
   run_with_timeout "$SCENE_TIMEOUT_S" "$log_dir" run_alpasim "$log_dir" "$scene" "$@" || status=$?
-  if [[ "$status" -eq 124 ]]; then
+  if [[ "$status" -eq 125 ]]; then
+    copy_results "$log_dir" "$stage" "$model" "$scene"
+    fail_out_of_memory "$log_dir" "$RESULTS/$stage/$model/$scene"
+  elif [[ "$status" -eq 124 ]]; then
     copy_results "$log_dir" "$stage" "$model" "$scene"
     fail "$scene timed out after ${SCENE_TIMEOUT_S} s (raise SCENE_TIMEOUT_S); logs in $RESULTS/$stage/$model/$scene"
   elif [[ "$status" -ne 0 ]]; then
@@ -281,6 +334,36 @@ stage_3() {
   echo "report: $RESULTS_ROOT/report.md"
 }
 
+# The labelled experiment: its settings on top of the wrapper, on one scene, in its own
+# folder with an EXPERIMENT.md label that the report shows at the top.
+stage_experiment() {
+  local experiment="${EXPERIMENT:-alpamayo2_comparison_6cam}" scene microbatch="${EXPERIMENT_MICROBATCH:-}"
+  [[ "$experiment" == alpamayo2_comparison_6cam ]] || fail "unknown EXPERIMENT=$experiment (alpamayo2_comparison_6cam)"
+  [[ "$MODEL" == alpamayo2_super ]] || fail "$experiment is for MODEL=alpamayo2_super, not $MODEL"
+  [[ "$GPU_LAYOUT" == 2gpu ]] || fail "$experiment needs GPU_LAYOUT=2gpu (more cameras and candidates than the default runs)"
+  scene="${EXPERIMENT_SCENE:-$(config_value "config['smoke_scene']")}"
+  local stage="experiment_${experiment}${microbatch:+_mb$microbatch}"
+  local overrides=("${WRAPPER_OVERRIDES[@]}" "+vla_on_edge_experiment=$experiment")
+  local check_flags="--experiment $experiment"
+  if [[ -n "$microbatch" ]]; then
+    overrides+=("driver.model.trajectory_candidate_microbatch_size=$microbatch")
+    check_flags+=" --microbatch $microbatch"
+  fi
+  set_stage "$stage"
+  mkdir -p "$RESULTS/$stage"
+  cat > "$RESULTS/$stage/EXPERIMENT.md" << EXPERIMENT_LABEL
+**Experiment, not the benchmark default:** \`$experiment\`, AlpaSim's own Alpamayo 2 comparison
+settings (6 cameras incl. rear left/right, 6 trajectory candidates sampled ${microbatch:-3} at a time,
+CLOSEST_LATERAL selection, expandable_segments) on one scene, through our plugin.
+The benchmark runs (stages 1-3) use AlpaSim's default: 4 cameras, 1 candidate, ALWAYS_FIRST.
+Settings: configs/alpasim/vla_on_edge_experiment/$experiment.yaml (commit $VLA_ON_EDGE_GIT_COMMIT).
+EXPERIMENT_LABEL
+  check_configs "$stage" "$scene" "$check_flags" "${overrides[@]}"
+  run_scene "$stage" "$MODEL" "$scene" --plugin-logs "${overrides[@]}"
+  stage_report "$stage"
+  echo "report: $RESULTS/$stage/report.md"
+}
+
 start_gpu_monitor
 record_host_versions "${1:-}"
 case "${1:-}" in
@@ -288,6 +371,7 @@ case "${1:-}" in
   2) stage_2 && copy_off_reminder ;;
   3) stage_3 && copy_off_reminder ;;
   all) stage_1 && copy_off_reminder && stage_2 && copy_off_reminder && stage_3 && copy_off_reminder ;;
-  *) fail "usage: $0 1|2|3|all" ;;
+  experiment) stage_experiment && copy_off_reminder ;;
+  *) fail "usage: $0 1|2|3|all|experiment" ;;
 esac
 echo "DONE: stage ${1}, $MODEL, $GPU_LAYOUT (results in $RESULTS)"

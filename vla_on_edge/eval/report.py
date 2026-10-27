@@ -246,9 +246,13 @@ def build_report(stage_dir: Path, output: Path) -> Path:
     report_dir.mkdir(parents=True, exist_ok=True)
     charts = plot_charts(summaries, stage, report_dir / "charts")
 
+    # A labelled experiment (scripts/run_stages.sh experiment) says so at the top.
+    label_path = stage_dir / "EXPERIMENT.md"
+    label = [label_path.read_text().strip(), ""] if label_path.exists() else []
     lines = [
         "# Driving benchmark report",
         "",
+        *label,
         f"Source: `{stage_dir}`. Driving metrics are AlpaSim's own (scene score: 0 on an at-fault "
         "collision or off-road, otherwise min(progress / 0.8, 1)). Jerk, latency, GPU memory, and "
         "validator flags come from our plugin logs. Latency is per prediction at batch size 1; p99 "
