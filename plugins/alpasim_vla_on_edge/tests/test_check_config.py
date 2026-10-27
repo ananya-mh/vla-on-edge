@@ -67,3 +67,16 @@ def test_two_driver_services_on_the_model_gpu_are_rejected():
     assert check_gpu_layout(services, "2gpu") == [
         "driver GPUs are [['0'], ['0']], expected one driver service on ['0'] (2gpu)"
     ]
+
+
+@needs_wizard
+def test_wrapper_runs_render_the_reasoning_overlay_and_stage_1_does_not(tmp_path):
+    import yaml
+
+    def layouts(log_dir):
+        return yaml.safe_load((log_dir / "eval-config.yaml").read_text())["video"]["video_layouts"]
+
+    wrapper = generate_configs(tmp_path / "wrapper", "alpamayo2", "alpamayo2_super", "1gpu")
+    builtin = generate_configs(tmp_path / "builtin", "alpamayo2", "builtin_offline", "1gpu")
+    assert layouts(wrapper) == ["DEFAULT", "REASONING_OVERLAY"]
+    assert layouts(builtin) == ["DEFAULT"]

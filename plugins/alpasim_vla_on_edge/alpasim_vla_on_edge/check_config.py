@@ -10,8 +10,8 @@ It repeats the two steps the driver does at startup that can fail on config: the
 strict schema merge of driver-config.yaml and the plugin registry lookup of
 model_type. It also checks the docker-compose services: for both runs, that the
 driver is offline against the mounted Hugging Face cache and that each service is on
-the GPU the layout says; for the wrapper, our mount, environment variables, and
-install command.
+the GPU the layout says; for the wrapper, our mount, environment variables, install
+command, and video layouts (eval-config.yaml).
 """
 
 import argparse
@@ -110,6 +110,15 @@ def check_wrapper_driver_service(driver: dict) -> list[str]:
     return problems
 
 
+def check_video_layouts(log_dir: Path) -> list[str]:
+    """Our wrapper runs render the reasoning overlay video next to AlpaSim's default one."""
+    layouts = yaml.safe_load((log_dir / "eval-config.yaml").read_text())["video"]["video_layouts"]
+    expected = ["default", "reasoning_overlay"]
+    if [str(layout).lower() for layout in layouts] != expected:
+        return [f"eval video_layouts are {layouts}, expected {expected}"]
+    return []
+
+
 def check_run(log_dir: Path, model: str, layout: str, builtin: bool) -> list[str]:
     """Return every problem with the generated configs (empty if fine)."""
     wrapper_type, builtin_type = MODEL_TYPES[model]
@@ -122,6 +131,7 @@ def check_run(log_dir: Path, model: str, layout: str, builtin: bool) -> list[str
     problems += check_offline_cache(driver)
     if not builtin:
         problems += check_wrapper_driver_service(driver)
+        problems += check_video_layouts(log_dir)
     return problems
 
 

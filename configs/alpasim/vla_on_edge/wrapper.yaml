@@ -17,6 +17,15 @@ runtime:
     # scene runs in its own wizard invocation with exactly one rollout.
     n_rollouts: 1
 
+eval:
+  video:
+    # AlpaSim's DEFAULT layout (BEV map + front camera + metrics) plus REASONING_OVERLAY
+    # (front camera with the model's reasoning text and a trajectory chart): one mp4
+    # each per rollout (src/eval/src/eval/video.py). AlpaSim has no multi-camera
+    # layout; camera_id_to_render takes one camera. Stage 1 (builtin_offline.yaml)
+    # keeps AlpaSim's DEFAULT only.
+    video_layouts: ["DEFAULT", "REASONING_OVERLAY"]
+
 services:
   driver:
     # Hydra cannot append to a list, so this restates AlpaSim's driver volumes
