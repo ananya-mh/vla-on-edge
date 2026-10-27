@@ -59,17 +59,35 @@ def scenario_table(model: str, summary: dict) -> list[str]:
     lines = [
         f"### {model}",
         "",
-        "| Scene | Score | Failure | Progress | Collision | Off-road | Jerk p95 / max (m/s³) | Latency p50 (s) | Flags |",
-        "|---|---|---|---|---|---|---|---|---|",
+        "| Scene | Score | Failure | Progress | Collision | Off-road | Scoring cut by drift | Jerk p95 / max (m/s³) "
+        "| Latency p50 (s) | Flags |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for row in summary["rows"]:
+        drift = "—" if row["drift_cut_s"] is None else f"at {row['drift_cut_s']:.1f} s"
         lines.append(
             f"| `{row['scene_id']}` | {fmt(row['score'])} | {row['failure_reason'] or '—'} "
             f"| {fmt(row['progress'])} | {'yes' if row['collision_at_fault'] else 'no'} "
-            f"| {'yes' if row['offroad'] else 'no'} | {fmt(row['jerk_p95'], 1)} / {fmt(row['jerk_max'], 1)} "
+            f"| {'yes' if row['offroad'] else 'no'} | {drift} | {fmt(row['jerk_p95'], 1)} / {fmt(row['jerk_max'], 1)} "
             f"| {fmt(row['latency_p50_s'])} | {percent(row['flag_rate'])} |"
         )
     return lines
+
+
+def drift_note(summaries: dict[str, dict], max_dist_m: float | None) -> list[str]:
+    """Warn when AlpaSim stopped scoring scenes early because the ego left the recorded drive."""
+    cut = sum(summary["n_drift_cut"] for summary in summaries.values())
+    if not cut:
+        return []
+    total = sum(summary["n_scenes"] for summary in summaries.values())
+    limit = f"{max_dist_m:g} m" if max_dist_m is not None else "the distance limit"
+    return [
+        f"**Note:** in {cut} of {total} scenes AlpaSim stopped scoring early because the ego was {limit} "
+        "or more from the recorded drive (column \"Scoring cut by drift\"). Those scores cover only the "
+        "time before that, so a score of 1.00 there does not mean the whole drive was clean; collisions "
+        "after it are not counted. See Worst cases for what happened next.",
+        "",
+    ]
 
 
 def reasoning_anchor(scene: dict) -> tuple[int | None, str]:
@@ -114,6 +132,14 @@ def outcome(rollout: dict) -> str:
     return f"no at-fault collision or off-road (progress {fmt(progress)})"
 
 
+def scoring_end_text(scene: dict) -> str:
+    """Why AlpaSim stopped scoring, in words."""
+    if scene["scored_end_reason"] == "drift":
+        return (f"the ego was {scene['max_dist_to_gt_m']:g} m or more from the recorded drive, "
+                "so what follows is not scored")
+    return "the first collision or off-road"
+
+
 def event_lines(scene: dict) -> list[str]:
     """Say when AlpaSim stopped scoring, and each first collision/off-road and whether it counted."""
     def seconds_in(time_us: int) -> str:
@@ -122,7 +148,7 @@ def event_lines(scene: dict) -> list[str]:
     lines = []
     if scene["scored_end_us"] is not None:
         lines.append(f"AlpaSim stopped scoring at {seconds_in(scene['scored_end_us'])} into the rollout: "
-                     f"{scene['scored_end_reason']}.")
+                     f"{scoring_end_text(scene)}.")
     for name, time_us in sorted(scene["event_times_us"].items(), key=lambda item: item[1]):
         counted = scene["scored_end_us"] is None or time_us <= scene["scored_end_us"]
         status = "scored" if counted else "after scoring stopped, so not in the score"
@@ -239,6 +265,8 @@ def build_report(stage_dir: Path, output: Path) -> Path:
     ]
     for model, summary in summaries.items():
         lines += [*scenario_table(model, summary), ""]
+    max_dists = [scene["max_dist_to_gt_m"] for scenes in stage.values() for scene in scenes]
+    lines += drift_note(summaries, max_dists[0] if max_dists else None)
     lines += gpu_monitor_section(stage_dir)
     lines += ["## Charts", ""]
     lines += [f"![{path.stem}](charts/{path.name})" for path in charts]

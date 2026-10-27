@@ -48,6 +48,9 @@ stages, run each stage with the same `RUN_ID=...`.
 - Videos are in `rollouts/<scene>/<rollout>/*.mp4`. Each scene gets a top-down map with the
   front camera, and, in stages 2 and 3, the front camera with the model's reasoning text.
 - Each stage writes `report.md` (tables, charts, worst cases), and stage 3 also writes `results/report.md`.
+- Run stage 3 more than once (each with its own `RUN_ID`) and combine the passes, since each pass is one
+  random rollout per scene: `.venv/bin/python -m vla_on_edge.eval.combine results/vm_<A>/stage3 results/vm_<B>/stage3`
+  writes `results/combined_report.md`, with the mean and spread per scene.
 - After each stage the script prints an `rsync` command. Copy results off before stopping the VM.
 
 ## More

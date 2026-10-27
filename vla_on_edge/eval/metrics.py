@@ -52,7 +52,9 @@ def first_time_us(wide: pl.DataFrame, condition: pl.Expr) -> int | None:
 
 
 def scoring_end(wide: pl.DataFrame, max_dist_to_gt_m: float) -> tuple[int | None, str | None]:
-    """Return when AlpaSim stops scoring the rollout and why (None, None if it scores to the end).
+    """Return when AlpaSim stops scoring the rollout and why: "drift" or "collision".
+
+    (None, None) if it scores to the end.
 
     Mirrors AlpaSim's two cuts, in its order: keep timesteps up to the first collision
     (any, including rear) or off-road (processing.py, DEFAULT_MODIFIERS), then up to
@@ -63,9 +65,9 @@ def scoring_end(wide: pl.DataFrame, max_dist_to_gt_m: float) -> tuple[int | None
     kept = wide if collision_us is None else wide.filter(pl.col("timestamps_us") <= collision_us)
     far_us = first_time_us(kept, pl.col("dist_to_gt_trajectory") >= max_dist_to_gt_m)
     if far_us is not None:
-        return far_us, f"the ego was {max_dist_to_gt_m:g} m or more from the recorded drive"
+        return far_us, "drift"
     if collision_us is not None:
-        return collision_us, "the first collision or off-road"
+        return collision_us, "collision"
     return None, None
 
 
@@ -119,15 +121,17 @@ def load_scene(log_dir: Path) -> dict:
     metrics_parquet = rollout_dir / "metrics.parquet"
     steps_path = log_dir / "vla_on_edge" / "steps.jsonl"
     scene = {"start_time_us": None, "scored_end_us": None, "scored_end_reason": None,
-             "event_times_us": {}, "event_time_us": None}
+             "max_dist_to_gt_m": None, "event_times_us": {}, "event_time_us": None}
     if metrics_parquet.exists():
         wide = driven_timesteps(metrics_parquet)
-        scored_end_us, scored_end_reason = scoring_end(wide, max_dist_to_gt_m(log_dir))
+        max_dist_m = max_dist_to_gt_m(log_dir)
+        scored_end_us, scored_end_reason = scoring_end(wide, max_dist_m)
         event_times_us = first_event_times_us(wide)
         scene = {
             "start_time_us": rollout_start_us(metrics_parquet),
             "scored_end_us": scored_end_us,
-            "scored_end_reason": scored_end_reason,
+            "scored_end_reason": scored_end_reason,  # "drift", "collision", or None
+            "max_dist_to_gt_m": max_dist_m,
             "event_times_us": event_times_us,  # every first event, scored or not
             "event_time_us": first_counted_event_us(event_times_us, scored_end_us),
         }
@@ -161,7 +165,17 @@ def scene_row(scene: dict) -> dict:
         "latency_p50_s": float(np.percentile(latencies, 50)) if latencies else None,
         "n_predictions": len(records),
         "flag_rate": len(flagged) / len(records) if records else None,
+        # When AlpaSim stopped scoring early because the ego left the recorded drive,
+        # seconds into the rollout (None otherwise): a score of 1.00 then covers only that part.
+        "drift_cut_s": scored_seconds(scene) if scene["scored_end_reason"] == "drift" else None,
     }
+
+
+def scored_seconds(scene: dict) -> float | None:
+    """Seconds into the rollout at which AlpaSim stopped scoring, or None if it scored to the end."""
+    if scene["scored_end_us"] is None:
+        return None
+    return (scene["scored_end_us"] - scene["start_time_us"]) / 1e6
 
 
 def latency_summary(latencies: list[float]) -> dict:
@@ -198,6 +212,7 @@ def model_summary(scenes: list[dict]) -> dict:
         "collision_rate": mean_or_none([float(row["collision_at_fault"] > 0) for row in rows]),
         "offroad_rate": mean_or_none([float(row["offroad"] > 0) for row in rows]),
         "progress": mean_or_none([row["progress"] for row in rows]),
+        "n_drift_cut": sum(1 for row in rows if row["drift_cut_s"] is not None),
         "jerk_p95": float(np.percentile(jerks, 95)) if jerks else None,
         "latency": latency_summary([r["latency_s"]["batch"] for r in records]),
         "gpu_peak_allocated_gib": max(m["peak_allocated"] for m in memories) / 1024 if memories else None,
@@ -210,9 +225,13 @@ def model_summary(scenes: list[dict]) -> dict:
 
 
 def load_stage(stage_dir: Path) -> dict[str, list[dict]]:
-    """Return {model name: [scene, ...]} for every scene folder in a stage."""
+    """Return {model name: [scene, ...]} for every scene folder in a stage.
+
+    Folders without scene runs (e.g. the report's own charts/) are not models.
+    """
     models = {}
     for model_dir in sorted(path for path in stage_dir.iterdir() if path.is_dir()):
         scene_dirs = sorted(path for path in model_dir.iterdir() if (path / "aggregate").is_dir())
-        models[model_dir.name] = [load_scene(scene_dir) for scene_dir in scene_dirs]
+        if scene_dirs:
+            models[model_dir.name] = [load_scene(scene_dir) for scene_dir in scene_dirs]
     return models

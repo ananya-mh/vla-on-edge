@@ -129,7 +129,7 @@ def test_events_after_alpasim_stops_scoring_are_not_counted(tmp_path):
     wide = driven_timesteps(drifted_then_hit_parquet(tmp_path))
     scored_end_us, reason = scoring_end(wide, 4.0)
     assert (scored_end_us - START_US) / 1e6 == pytest.approx(10.4, abs=0.05)
-    assert reason == "the ego was 4 m or more from the recorded drive"
+    assert reason == "drift"
     events = first_event_times_us(wide)
     assert set(events) == {"collision_rear", "collision_front"}
     assert first_counted_event_us(events, scored_end_us) is None
@@ -139,11 +139,12 @@ def test_worst_case_text_matches_alpasims_verdict(tmp_path):
     wide = driven_timesteps(drifted_then_hit_parquet(tmp_path))
     scored_end_us, reason = scoring_end(wide, 4.0)
     scene = {"start_time_us": START_US, "scored_end_us": scored_end_us, "scored_end_reason": reason,
-             "event_times_us": first_event_times_us(wide)}
+             "max_dist_to_gt_m": 4.0, "event_times_us": first_event_times_us(wide)}
     passed = {"failure_reason": None, "metrics": {"progress_clipped_rel": 1.0}}
     assert outcome(passed) == "no at-fault collision or off-road (progress 1.00)"
     assert event_lines(scene) == [
-        "AlpaSim stopped scoring at 10.4 s into the rollout: the ego was 4 m or more from the recorded drive.",
+        "AlpaSim stopped scoring at 10.4 s into the rollout: the ego was 4 m or more from the recorded drive, "
+        "so what follows is not scored.",
         "- not-at-fault collision (rear) at 12.8 s (after scoring stopped, so not in the score)",
         "- at-fault collision (front) at 13.8 s (after scoring stopped, so not in the score)",
     ]
@@ -158,5 +159,46 @@ def test_a_rear_collision_ends_scoring_but_is_not_at_fault(tmp_path):
     pl.DataFrame(rows).write_parquet(tmp_path / "metrics.parquet")
     wide = driven_timesteps(tmp_path / "metrics.parquet")
     scored_end_us, reason = scoring_end(wide, 4.0)
-    assert reason == "the first collision or off-road" and scored_end_us == START_US + 9_000_000
+    assert reason == "collision" and scored_end_us == START_US + 9_000_000
     assert first_counted_event_us(first_event_times_us(wide), scored_end_us) is None
+
+
+def test_folders_without_scene_runs_are_not_models(stage_dir, tmp_path):
+    report = build_report(stage_dir, tmp_path / "report.md")  # writes charts/ next to the report
+    build_report(stage_dir, stage_dir / "report.md")  # and here into the stage folder itself, as run_stages.sh does
+    assert list(load_stage(stage_dir)) == ["alpamayo1_5"]
+    assert "| charts |" not in (stage_dir / "report.md").read_text() and report.exists()
+
+
+def test_scenes_cut_short_by_drift_are_flagged(tmp_path):
+    from vla_on_edge.eval.report import drift_note
+
+    summary = {"n_scenes": 8, "n_drift_cut": 1}
+    note = drift_note({"alpamayo2_super": summary}, 4.0)
+    assert "in 1 of 8 scenes AlpaSim stopped scoring early" in note[0] and "4 m" in note[0]
+    assert drift_note({"alpamayo2_super": {**summary, "n_drift_cut": 0}}, 4.0) == []
+
+
+def test_combined_report_shows_passes_and_spread(tmp_path):
+    from vla_on_edge.eval.combine import build_combined_report, load_passes, spread
+
+    first = write_fake_run(tmp_path / "vm_a" / "stage3", seed=0)
+    second = write_fake_run(tmp_path / "vm_b" / "stage3", seed=1)
+    # In pass 2, the clean first scene "scores" 0.0, as when a random rollout crashes.
+    clean = sorted((second / "alpamayo1_5").iterdir())[0]
+    summary_path = clean / "aggregate/results-summary.json"
+    summary = json.loads(summary_path.read_text())
+    summary["rollouts"][0]["score"] = 0.0
+    summary_path.write_text(json.dumps(summary))
+
+    passes, by_model = load_passes([first, second])
+    assert [p["n_scenes"] for p in passes] == [8, 8]
+    rows = by_model["alpamayo1_5"][clean.name]
+    assert [r["pass_index"] for r in rows] == [0, 1]
+    scores = spread([r["score"] for r in rows])  # 1.0 in pass 1, 0.0 in pass 2
+    assert (scores["mean"], scores["sd"], scores["min"], scores["max"]) == pytest.approx((0.5, 0.7071, 0.0, 1.0), abs=1e-4)
+
+    report = build_combined_report([first, second], tmp_path / "combined.md").read_text()
+    assert "2 passes" in report and f"| `{clean.name}` | 2 | 0.50 ± 0.71 (0.00–1.00) |" in report
+    assert "2 of 2" in report  # the fake collision scene collides in both passes
+    assert spread([]) == {"n": 0, "mean": None, "sd": None, "min": None, "max": None}
