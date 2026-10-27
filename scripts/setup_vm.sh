@@ -2,8 +2,9 @@
 # One-time setup of a fresh cloud GPU VM, so that scripts/run_stages.sh only executes.
 #
 # Needs: a VM (not a container-based GPU pod) with Docker (compose + buildx plugins,
-# usable without sudo), the NVIDIA driver, and the NVIDIA Container Toolkit. Moving
-# Docker's data-root (once) needs passwordless sudo.
+# usable without sudo), NVIDIA driver 580 or newer, and the NVIDIA Container Toolkit.
+# On a fresh Ubuntu 24.04 VM, scripts/bootstrap_vm.sh installs these (then reboot).
+# Moving Docker's data-root (once) needs passwordless sudo.
 #
 # Everything large lives under DATA_DIR: Docker's images and build cache, the
 # Hugging Face and uv caches, our repo and AlpaSim (whose data/ holds the scenes),
@@ -31,7 +32,10 @@ REPO_URL="${REPO_URL:-https://github.com/ananya-mh/vla-on-edge.git}"
 REPO_REF="${REPO_REF:-main}"
 ALPASIM_URL="https://github.com/NVlabs/alpasim.git"
 ALPASIM_COMMIT="affc2eab209fa43bdfa2f26c0f8d437922d78a68"  # the commit everything was built against
-MIN_DRIVER_MAJOR=570          # AlpaSim's renderer container uses CUDA 12.8 (docs/ONBOARDING.md)
+# 580 = CUDA 13. AlpaSim's physics uses warp-lang 1.18.0 (third_party/alpasim/uv.lock),
+# which failed on 570 on our first VM; its renderer needs CUDA 12.8 (570+,
+# docs/ONBOARDING.md), so 580 covers both.
+MIN_DRIVER_MAJOR=580
 MIN_FREE_DISK_GB=200          # AlpaSim + renderer images, Alpamayo 1.5 (22 GB), scenes, rollouts
 # Where VM providers mount a local scratch disk (Hyperstack: /ephemeral, per
 # docs.hyperstack.cloud/docs/storage/ephemeral).
@@ -58,7 +62,7 @@ step() { echo; echo "==> $*"; }
 check_prerequisites() {
   step "Checking prerequisites"
   for tool in git curl docker nvidia-smi; do
-    command -v "$tool" > /dev/null || fail "'$tool' is not installed"
+    command -v "$tool" > /dev/null || fail "'$tool' is not installed (on a fresh VM, run scripts/bootstrap_vm.sh first)"
   done
   docker info > /dev/null 2>&1 || fail "docker does not run without sudo; run: sudo usermod -aG docker \$USER, then log in again"
   docker compose version > /dev/null 2>&1 || fail "the docker compose plugin is missing"
@@ -66,7 +70,9 @@ check_prerequisites() {
 
   local driver_major gpu_memory
   driver_major="$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -1 | cut -d. -f1)"
-  [[ "$driver_major" -ge "$MIN_DRIVER_MAJOR" ]] || fail "NVIDIA driver $driver_major < $MIN_DRIVER_MAJOR (needed for CUDA 12.8)"
+  [[ "$driver_major" -ge "$MIN_DRIVER_MAJOR" ]] || fail "NVIDIA driver $driver_major is too old: need $MIN_DRIVER_MAJOR+ \
+(CUDA 13; AlpaSim's physics uses Warp 1.18.0). Don't upgrade the driver in place (570 -> 580 \
+broke on a package conflict); start a new VM with a $MIN_DRIVER_MAJOR+ driver, or one with no driver and run scripts/bootstrap_vm.sh"
   gpu_memory="$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -1)"
   [[ "$gpu_memory" -ge "$MIN_GPU_MEMORY_MIB" ]] || echo "WARNING: GPU 0 has ${gpu_memory} MiB; the plan assumes 80 GB"
   [[ -n "${HF_TOKEN:-}" ]] || fail "HF_TOKEN is not set (create one at https://huggingface.co/settings/tokens)"

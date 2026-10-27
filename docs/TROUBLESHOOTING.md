@@ -25,7 +25,7 @@ Problems we hit, in the order we hit them.
 ## The VM had no Docker
 - Symptom: `docker` was missing, and after installing it, it still needed sudo.
 - Cause: the image didn't include Docker or the NVIDIA Container Toolkit, and joining the docker group only takes effect at a new login.
-- Fix: installed Docker and the toolkit by hand, then rebooted.
+- Fix: installed Docker and the toolkit by hand, then rebooted. scripts/bootstrap_vm.sh now does this on a fresh VM.
 
 ## The root disk was too small
 - Symptom: the 100 GB root disk can't hold the images, model files, scenes and rollouts.
@@ -50,9 +50,9 @@ Problems we hit, in the order we hit them.
 ## The physics service failed with driver 570
 - Symptom: physics failed at startup on the 570 NVIDIA driver.
 - Cause: AlpaSim's image ships Warp 1.18.0, which needs a CUDA 13 driver (580 or newer).
-- Fix: use a VM that starts with driver 580 or newer. setup_vm.sh still accepts 570; raising its check is pending.
+- Fix: setup_vm.sh now requires driver 580 or newer.
 
 ## Upgrading the driver in place broke it
 - Symptom: upgrading from 570 to 580 failed with conflicts between the two driver versions' packages.
 - Cause: the packages for the two driver versions overlap.
-- Fix: none on that VM; started over on a fresh VM with 580 or newer from the start.
+- Fix: start a new VM with driver 580 or newer, or with no driver. bootstrap_vm.sh installs `nvidia-driver-580-open` only when no driver is present, and never over an existing one.
