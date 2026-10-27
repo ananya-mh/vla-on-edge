@@ -68,7 +68,12 @@ Commit hashes point to the fix.
 - Cause: the text read raw per-step events. AlpaSim had stopped scoring at 10.4 s, when the car was 4 m from the recorded drive, so later collisions didn't count.
 - Fix: the text now applies AlpaSim's cutoffs, and marks each event as at fault or not, and scored or not (b0e8308).
 
-## The report lists its own `charts` folder as a model (open)
-- Symptom: stage 2's `report.md` has a `charts` row with no data.
-- Cause: the report treats every folder in the stage directory as a model, including the `charts/` folder it writes there.
-- Fix: not fixed yet. Ignore the row for now.
+## The report listed its own `charts` folder as a model
+- Symptom: stage 2's `report.md` had a `charts` row with no data.
+- Cause: the report treated every folder in the stage directory as a model, including the `charts/` folder it writes there.
+- Fix: only folders that contain scene runs count as models (e8afb26).
+
+## The same scene scored 1.00 in stage 1 and 0.00 in stage 2
+- Symptom: identical configs apart from our plugin, opposite results on one scene.
+- Cause: not the plugin; its trajectories match what AlpaSim received exactly. Alpamayo samples at random, and AlpaSim picks a new random seed every run.
+- Fix: run stage 3 several times and combine the passes (`vla_on_edge.eval.combine`), reporting mean and spread per scene (e8afb26).
