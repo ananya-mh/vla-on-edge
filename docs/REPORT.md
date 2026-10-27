@@ -1,151 +1,202 @@
-# Results (draft)
+# Results: Alpamayo 2 Super in AlpaSim
 
-> **Status:** draft. Stages 1 and 2 have run for Alpamayo 2 Super, each on one scene.
-> Anything marked **[TODO]** will come from the generated
-> `results/vm_<RUN_ID>/stage3/report.md` once stage 3 has run. The numbers shown
-> come from run `vm_20261027_195851`; none are estimated.
+All numbers come from four result folders and from our analysis of AlpaSim's own logs
+(`rollout.asl`):
+- `results/vm_20261027_195851/`: stages 1 and 2
+- `results/vm_20261027_210046/`: stage 3
+- `results/vm_exp_6cam_1/`: the experiment
+
+None are estimated. How the pieces fit: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Goal
 
-Measure how well open self-driving models drive when their decisions actually
-move the car (closed-loop), and what that costs in time and GPU memory. The
-first model is NVIDIA's Alpamayo 2 Super; Alpamayo 1.5 follows on the same setup.
-How the pieces fit: [ARCHITECTURE.md](ARCHITECTURE.md).
+Measure how well an open self-driving model drives when its own decisions move the
+car (closed-loop), and what that costs in time and GPU memory. This report covers
+NVIDIA's Alpamayo 2 Super. Alpamayo 1.5 is set up on the same pipeline but not run yet.
 
 ## Setup
 
-- **Simulator:** NVIDIA AlpaSim (commit `affc2eab`) with the NuRec renderer.
-  NuRec draws camera images from 3D reconstructions of real recorded drives.
-- **Scenes:** 8 on-road scenes from NVIDIA's public set (suite `public_2601`), listed in
-  `configs/scenarios.yaml`. Two are AlpaSim's own reference scenes; six are a seeded
-  random sample. We don't yet know how hard each one is.
-- **Each run:** one rollout per scene. A rollout is about 20 s of simulated time at
-  10 steps per second. For the first 1.7 s the car follows the recorded drive; then
-  the model takes over.
-- **Model input and output:** four cameras (front wide, front telephoto, left and
-  right cross views) and recent motion in; a reasoning sentence and a 6.4 s
-  trajectory (64 points, 0.1 s apart) out.
-- **Model settings:** bf16, batch size 1, one trajectory sample, AlpaSim's default settings.
-- **Hardware:** Hyperstack VM with 2× NVIDIA A100 80 GB PCIe, NVIDIA driver 580.178.04,
-  Docker 29.9.2, Compose 5.6.1. The model runs alone on GPU 0; the renderer and physics share GPU 1.
-- **Scoring:** AlpaSim's own. A scene scores 0 on an at-fault collision (front or side)
-  or on going off-road; otherwise it scores min(progress / 0.8, 1). AlpaSim stops scoring
-  at the first collision of any kind, or once the car is 4 m from the recorded drive.
-- **Our additions:** jerk (how abruptly acceleration changes), latency per decision,
-  GPU memory, and validator flags. Flags mark trajectories that break speed or
-  acceleration limits: speed 15 m/s, acceleration 2 m/s², braking 6 m/s². They are
-  recorded only; the trajectory is never changed.
+- **Simulator:** NVIDIA AlpaSim (commit `affc2eab`) with the NuRec renderer. NuRec draws
+  camera images from 3D reconstructions of real recorded drives.
+- **Other vehicles** replay the recording. They don't react to our car.
+- **Scenes:** 8 on-road scenes from NVIDIA's public set (`public_2601`), listed in
+  `configs/scenarios.yaml`. Two are AlpaSim's own reference scenes; six are a seeded random sample.
+- **A run:** one rollout per scene, about 20 s of simulated time at 10 steps per second.
+  For the first 1.7 s the car follows the recorded drive; then the model drives.
+- **Model settings (the benchmark default, which is AlpaSim's own):**
+  - inputs: four cameras (front wide, front telephoto, left and right cross views) and recent motion
+  - one sampled trajectory per step, always driven as is
+  - bf16, batch size 1
+  - output: a reasoning sentence and a 6.4 s trajectory (64 points)
+- **Hardware:** 2× NVIDIA A100 80 GB PCIe, NVIDIA driver 580.178.04. The model runs alone on
+  GPU 0; the renderer and physics share GPU 1.
+- **Scoring (AlpaSim's own):**
+  - A scene scores 0 on an at-fault collision (the other vehicle touches our car's front or side) or on going off-road.
+  - Otherwise it scores min(progress / 0.8, 1).
+  - AlpaSim **stops scoring** at the first collision of any kind, or once our car is 4 m or more from the recorded drive. Nothing after that counts.
+- **Our additions:**
+  - per-decision latency
+  - GPU memory
+  - jerk: how abruptly acceleration changes, in m/s³
+  - validator flags: trajectories over our speed or acceleration limits. They are recorded only; trajectories are never changed.
 
 ## Results
 
-### Stages 1 and 2: the same scene, twice (Alpamayo 2 Super)
+### Headline: 8 scenes, default settings (stage 3)
 
-Stage 1 runs AlpaSim's driver unchanged; stage 2 runs it through our logging plugin.
+| Metric | Value |
+|---|---|
+| Mean scene score | 0.80 |
+| At-fault collisions (scored) | 0 of 8 scenes |
+| Off-road | 1 of 8 scenes |
+| Mean progress | 0.80 |
+| Scoring stopped early by drift (≥ 4 m from the recorded drive) | 5 of 8 scenes |
+| Jerk, 95th percentile | 3.0 m/s³ |
+| Latency per decision, p50 / p90 / p99 | 3.13 / 3.74 / 4.55 s (n = 1,451) |
+| GPU 0 peak, driver (nvidia-smi) | 69.3–69.5 GiB per scene |
+| GPU 1 peak | renderer 3.5–9.6 GiB, physics 0.5–0.6 GiB per scene |
+| Wall-clock time | 784–877 s per scene, 6,642 s for all 8 |
 
-| | Stage 1 | Stage 2 |
+| Scene | Score | Progress | What happened |
+|---|---|---|---|
+| `01d503d4` (crash scene) | 1.00 | 1.00 | Scoring stopped by drift at 10.6 s; unscored collisions after it (side 11.2 s, front 11.4 s, rear 12.5 s) |
+| `02eadd92` | 1.00 | 0.87 | Scored to the end |
+| `235c5235` | 1.00 | 1.00 | Scoring stopped by drift at 19.4 s, near the end |
+| `28e3a9ca` | 0.57 | 0.46 | Scoring stopped by drift at 7.5 s |
+| `73ee2cdb` | 1.00 | 1.00 | Scoring stopped by drift at 19.9 s, at the end |
+| `b6f09ef3` | 1.00 | 0.97 | Scored to the end |
+| `b988494a` | 0.79 | 0.63 | Scoring stopped by drift at 12.4 s |
+| `eda66f79` | 0.00 | 0.49 | Off-road at 8.8 s, in a work zone |
+
+Validator flags were raised on 40% of decisions (speed 531, acceleration 78, waypoint
+timing 13, deceleration 1). Most are speed flags against our first-guess 15 m/s limit,
+which is too low for these roads, so this rate says little yet.
+
+### The crash scene, three default runs
+
+The same scene ran in stages 1, 2, and 3 with identical settings. Only the random
+sampling differed: AlpaSim picks a new seed every run, and the model samples randomly.
+
+| Run | Score | What happened |
 |---|---|---|
-| Scene score | 1.00 | 0.00 |
-| Outcome | no at-fault collision or off-road | at-fault collision (front) at 11.4 s |
-| Progress | 1.00 | 1.00 |
-| Wall-clock time per scene | 844 s | 814 s |
-| Latency per decision, p50 / p90 (n) | not logged | 3.16 s / 4.17 s (n = 182) |
-| Jerk p95 / max | not logged | 3.6 / 9.4 m/s³ |
-| Validator flags | not logged | 21% of 182 decisions |
-| GPU 0 peak, driver (nvidia-smi) | 69.5 GiB | 69.5 GiB |
-| PyTorch peak allocated / reserved | not logged | 68.4 / 68.9 GiB |
-| GPU 1 peak, renderer + physics | 9.3 GiB | 9.3 GiB |
+| Stage 1 (AlpaSim's driver, no plugin) | 1.00 | Scoring stopped by drift at 10.4 s; unscored collisions at 12.8 s (rear), 13.8 s (front), 18.7 s (side) |
+| Stage 2 (our plugin) | 0.00 | At-fault front collision at 11.4 s (scored) |
+| Stage 3 (our plugin) | 1.00 | Scoring stopped by drift at 10.6 s; unscored collisions from 11.2 s |
 
-The same model on the same scene scored 1.00 once and 0.00 once. Our plugin returns
-the model's trajectories unchanged. The model samples its reasoning and trajectory
-at random: AlpaSim's default config sets `force_determinism: false`. So one rollout
-per scene is not enough to rank models. See [Limitations](#limitations).
+- **Scores:** mean 0.67, spread (sample standard deviation) 0.58. Progress was 1.00 in all three.
+- **Every run hit another vehicle at the front or side**, between 11.2 s and 13.8 s. AlpaSim counted it in one run only.
+- **Latency per decision, p50:** 3.16 s (stage 2) and 3.15 s (stage 3). Stage 1 has no plugin logs.
+- **Our plugin is not the cause.** All 182 trajectories in stage 2 match what AlpaSim received, to 17 µm, with identical timestamps and reasoning text.
 
-### Stage 3: all scenes, through our plugin
+### Experiment: NVIDIA's comparison settings on the crash scene (single trial)
 
-**[TODO]** Copy the Headline and Per-scenario tables from
-`results/vm_<RUN_ID>/stage3/report.md`:
+AlpaSim ships NVIDIA's own Alpamayo 2 comparison settings, and they differ from the default in four ways:
+- six cameras, adding rear left and rear right
+- six trajectory candidates per step, sampled three at a time
+- the `CLOSEST_LATERAL` rule: drive the candidate closest sideways to the previous plan
+- a memory allocator setting (`expandable_segments`)
 
-| Model | Scenes | Driving score | Collision (at fault) | Off-road | Progress | Jerk p95 | Latency p50 / p90 (n) | GPU peak | Validator flags |
-|---|---|---|---|---|---|---|---|---|---|
-| Alpamayo 2 Super | **[TODO]** | **[TODO]** | **[TODO]** | **[TODO]** | **[TODO]** | **[TODO]** | **[TODO]** | **[TODO]** | **[TODO]** |
-| Alpamayo 1.5 | **[TODO]** | | | | | | | | |
+We ran them once on the crash scene, through our plugin (`run_stages.sh experiment`).
+**This is a single trial: one random draw, not a measured improvement.**
 
-**[TODO]** Charts: score by scene, latency distribution, validator flags (from the generated report's `charts/`).
+| | Stage 2 (default) | Stage 3 (default) | Experiment |
+|---|---|---|---|
+| Scene score | 0.00 | 1.00 | 1.00 |
+| Progress | 1.00 | 1.00 | 0.98 |
+| How scoring ended | at-fault front collision, 11.4 s | drift, 10.6 s | hit from behind, 11.3 s |
+| Unscored collisions after that | rear, 14.4 s | side 11.2 s, front 11.4 s, rear 12.5 s | front, 11.7 s |
+| Latency per decision, p50 / p90 (n) | 3.16 / 4.17 s (182) | 3.15 / 3.87 s (182) | 8.29 / 10.66 s (182) |
+| GPU 0 peak, driver (nvidia-smi) | 69.5 GiB | 69.5 GiB | 73.5 GiB |
+| PyTorch peak allocated / reserved | 68.4 / 68.9 GiB | 68.4 / 68.9 GiB | 72.5 / 72.9 GiB |
+| Jerk p95 / max | 3.6 / 9.4 m/s³ | 7.1 / 16.9 m/s³ | 5.8 / 12.2 m/s³ |
+| Plan swing, 1.7–8 s (see below) | 3.3 m | 2.6 m | 0.8 m |
+| Wall-clock time | 814 s | 796 s | 1,811 s |
 
-### Experiment: AlpaSim's Alpamayo 2 comparison settings (not the benchmark default)
+"Plan swing" is how far the end point of the planned path moves sideways from one step
+to the next, on average.
 
-The benchmark uses AlpaSim's default driver settings: 4 cameras, one trajectory
-sample, always the first one. NVIDIA's own Alpamayo 2 comparison preset instead
-uses six cameras (adding rear left and right), six candidates per step, and
-`CLOSEST_LATERAL`. That rule drives the candidate closest sideways to the previous
-plan, which should steady the plan-to-plan swings we saw. One run on the stage 2
-crash scene, through our plugin (`run_stages.sh experiment`):
+- **The plans were much steadier.** The swing was 0.8 m instead of about 3 m. After 8 s the
+  car held its lane and braked to 0.4 m/s, with straight plans that matched its "keep
+  distance" reasoning.
+- **The cost:** each decision took 2.6 times as long, and the driver needed 4 GiB more GPU memory.
+- **Jerk was no better:** p95 was 5.8 m/s³, between the two default runs.
+- **The 1.00 is misleading here too.** A replayed truck, which cannot react, drove into the
+  nearly stopped car from behind. That ended scoring, and a front contact 0.4 s later was never scored.
 
-| | Default (stage 2) | Comparison settings |
-|---|---|---|
-| Scene score | 0.00 | **[TODO]** |
-| Latency per decision, p50 / p90 (n) | 3.16 / 4.17 s (182) | **[TODO]** |
-| GPU 0 peak, driver | 69.5 GiB | **[TODO]** |
-| GPU 1 peak, renderer + physics | 9.3 GiB | **[TODO]** |
+### Latency against real time
 
-One run is one random draw, like every other single run here.
+At 10 decisions per second, a car needs each decision in under 0.1 s.
+- **Default settings:** p50 is 3.13 s, about 31 times too slow.
+- **Comparison settings:** p50 is 8.29 s, about 83 times too slow.
 
-## Notable drives
+This doesn't affect the scores, because the simulator waits for each decision.
+It is the gap that compression and smaller GPUs would have to close.
 
-**Stage 1, scene `clipgt-01d503d4…`: perfect score, but the car left the recorded path.**
-- At 10.4 s the car was 4 m or more from the recorded drive, so AlpaSim stopped scoring there.
-- After that, the car was hit from behind (12.8 s), then hit something in front (13.8 s)
-  and at the side (18.7 s).
-- None of these collisions count toward the score, because they happened after scoring stopped.
-- We re-rendered the reasoning-overlay video from this run's logs. At 9 s it shows the
-  reasoning "Keep distance to the lead vehicle because it is slowing ahead", and
-  visible rendering artifacts, such as a car that seems to float above the road.
+## Key findings
 
-So the score says the model drove well while it was being scored. It says nothing
-about what happened after the car left the recorded path.
+1. **Single-sample plans are unstable.** With one sample per step, the plan's end point
+   jumped sideways by about 3 m between steps on average. Just before the stage 2 crash it
+   jumped by 7 m on average. The car followed each new plan, so the swings added up to a lane
+   change into an occupied lane. With six candidates and `CLOSEST_LATERAL`, the swing fell
+   to 0.8 m.
+2. **The reasoning text and the plan often disagree.** Just before the stage 2 crash, the
+   text kept saying "Keep distance to the lead vehicle because traffic ahead is congested",
+   while the plans pointed up to 18 m to the left. Read the reasoning as a hint, not as an
+   explanation of the trajectory.
+3. **The renderer breaks down when the car leaves the recorded path.**
+   - Once the car drifts, the scene is drawn from viewpoints the reconstruction never saw: smeared cars and floating shapes.
+   - The reasoning in those moments mentions "limited visibility from rain".
+   - We can't tell how much these images caused the later mistakes, but some failures after drift may be the renderer's, not the model's.
+4. **A score of 1.00 can hide a crash.**
+   - AlpaSim stopped scoring early because of drift in 5 of 8 scenes.
+   - In the crash scene, two of the three default runs scored 1.00 and then collided after scoring stopped.
+   - The experiment's 1.00 also ended with a front contact just after scoring stopped.
+   - Our report now marks every drift cut, and lists each later collision as at fault or not, and scored or not.
+5. **Traffic doesn't react.** Other vehicles replay the recording, so a car that does
+   something other than the recorded driver can be hit by vehicles that never brake. That
+   happened in the experiment.
 
-**Stage 2, the same scene: at-fault front collision at 11.4 s.** AlpaSim stopped
-scoring there. A rear collision followed at 14.4 s, which was not scored. In the
-0.2 s before the collision, the model's reasoning switched between three plans:
-- "Slow down to create a usable gap for merging left because the right lane ahead is
-  blocked by a stopped vehicle and queued traffic."
-- "Slow down to create a gap on the left for a lane change because the adjacent left
-  lane is occupied by passing traffic while the lead traffic ahead is stopped/slow."
-- "Keep distance to the lead vehicle because traffic ahead is congested."
+## What to show
 
-The reasoning-overlay video for this drive is in the stage 2 results.
-
-**[TODO]** The three lowest-scoring drives from stage 3, each with what happened, the
-model's reasoning just before, and a link to the reasoning-overlay video.
+1. **The stage 2 crash, with reasoning** (findings 1, 2 and 3):
+   `results/vm_20261027_195851/stage2/alpamayo2_super/clipgt-01d503d4-449b-46fc-8d78-9085e70d3554/rollouts/clipgt-01d503d4-449b-46fc-8d78-9085e70d3554/58329a0c-d245-11f1-b05a-09dde8096c31/clipgt-01d503d4-449b-46fc-8d78-9085e70d3554_58329a0c-d245-11f1-b05a-09dde8096c31_camera_front_wide_120fov_reasoning_overlay.mp4`.
+   - Watch 9–11.5 s.
+   - At 11.1 s the text says "Keep distance…" while the plotted plan curves about 18 m left, and the cars around are smeared.
+2. **The work-zone off-road, a model error with a clean image:**
+   `results/vm_20261027_210046/stage3/alpamayo2_super/clipgt-eda66f79-fa63-418c-97e6-14b91a0c615f/rollouts/clipgt-eda66f79-fa63-418c-97e6-14b91a0c615f/16085c40-d257-11f1-a65b-454b237da872/clipgt-eda66f79-fa63-418c-97e6-14b91a0c615f_16085c40-d257-11f1-a65b-454b237da872_camera_front_wide_120fov_reasoning_overlay.mp4`.
+   - At 8.4 s the model plans a right lane change through the cones ("Change lanes to the right due to work-zone cones…").
+   - It leaves the road at 8.8 s.
+3. **The experiment, top-down view** (findings 4 and 5):
+   `results/vm_exp_6cam_1/experiment_alpamayo2_comparison_6cam/alpamayo2_super/clipgt-01d503d4-449b-46fc-8d78-9085e70d3554/rollouts/clipgt-01d503d4-449b-46fc-8d78-9085e70d3554/80d9aaca-d25b-11f1-abd7-63e2c7763985/clipgt-01d503d4-449b-46fc-8d78-9085e70d3554_80d9aaca-d25b-11f1-abd7-63e2c7763985_camera_front_wide_120fov_default.mp4`.
+   - Watch 10–12 s: the car holds its lane and slows almost to a stop, and the replayed truck behind runs into it.
+   - At 11.6 s the metrics panel shows `collision_rear` 1 but `collision_at_fault` 0.
 
 ## Limitations
 
 - **On-road scenes only.** All scenes are public-road drives; none are off-road.
-- **Few scenes, one random rollout each.** Eight scenes, one rollout each. The model
-  samples at random, and the same scene scored 1.00 in stage 1 and 0.00 in stage 2. Differences
-  between models will be noisy, and the scenes were not picked for difficulty.
-- **Scoring stops early.** AlpaSim stops scoring at the first collision or once the car
-  drifts 4 m from the recorded drive. A high score can hide what happened later, as in
-  stage 1.
-- **Rendering artifacts.** The renderer can only reconstruct what was recorded.
-  Once the car moves away from the recorded path, images can be blurred or wrong.
-  The model sees these images, so some failures may come from the renderer rather
-  than the model.
-- **A100, not H100.** NVIDIA tested Alpamayo on H100 GPUs. Our latency on the A100 is not
-  comparable to NVIDIA's numbers, and is comparable only between runs with the same GPU
-  layout.
-- **Latency is model time only.** It is the time per decision in the driver, about 3 s
-  on the A100. It doesn't include rendering or physics. The simulator waits for each
-  decision, so slow decisions don't hurt the driving score.
-- **Validator limits are first guesses.** They are not calibrated against real driving data yet.
-- **Default settings.** Each model runs with AlpaSim's defaults (one sample, no extra
-  guidance). Other settings may drive better or worse.
+- **Few scenes, few runs.**
+  - Eight scenes with one run each, plus three runs of one scene. That scene scored 1.00, 0.00 and 1.00.
+  - Per-scene scores are close to a coin flip, and the experiment is a single trial.
+- **Scoring stops early.** Drift and the first collision end scoring, so later events don't count.
+- **Rendering artifacts** once the car leaves the recorded path.
+- **Non-reactive traffic.** Other vehicles replay the recording.
+- **A100, not H100.**
+  - NVIDIA tested Alpamayo 2 Super on H100 only.
+  - Our latency isn't comparable to NVIDIA's.
+  - It is comparable only between our runs with the same GPU layout.
+- **Latency is model time only.** It is measured in the driver and excludes rendering and physics.
+- **Default settings.** The benchmark uses AlpaSim's default four-camera, one-sample setting.
+  NVIDIA's comparison setting looks steadier but is 2.6 times slower, and we tried it once.
+- **Validator limits are first guesses.** For example, the 15 m/s speed limit flags normal highway driving.
 
 ## Next steps
 
-1. Run stage 3 for Alpamayo 2 Super; fill in the **[TODO]** sections from the generated report.
-2. Run each scene several times (each as its own run), or turn on AlpaSim's `force_determinism`, so results can be repeated.
-3. Run the same three stages for Alpamayo 1.5 and compare the two models.
-4. Screen a larger set of scenes and swap in harder ones (dense traffic, unprotected turns).
-5. Calibrate the validator limits from these runs.
-6. Later: add general vision-language models through the agent layer (see [ARCHITECTURE.md](ARCHITECTURE.md)).
+1. **Repeat runs.** Run stage 3 two or three more times and combine the passes
+   (`vla_on_edge.eval.combine`), to report a mean and spread per scene. Repeat the
+   comparison settings the same way before drawing conclusions from them.
+2. **Alpamayo 1.5.** Run the same three stages for Alpamayo 1.5 on one GPU, and compare it with 2 Super.
+3. **General VLMs.** Add general vision-language models through the agent layer (see [ARCHITECTURE.md](ARCHITECTURE.md)).
+4. **Compression.** Try quantization, pruning, and distillation. Measure how latency and memory move towards the
+   0.1 s real-time budget, and what that costs in driving score.
+5. **Off-road scenes.** Build or find off-road scenes; all current scenes are on-road.
+6. **Calibration.** Calibrate the validator limits, and screen more scenes to swap in harder ones.

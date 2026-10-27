@@ -87,8 +87,8 @@ AlpaSim does not compute.
 ## Two integration paths
 
 1. **AlpaSim plugin (used now, for Alpamayo).** AlpaSim drives the loop and calls
-   the model. Status: built and tested offline; Alpamayo 2 Super has passed stages 1
-   and 2 on a real 2-GPU VM. Stage 3 (all scenes) and Alpamayo 1.5 are not run yet.
+   the model. Status: built and tested offline. Alpamayo 2 Super has run all three
+   stages on a real 2-GPU VM, plus one labelled experiment. Alpamayo 1.5 is not run yet.
 2. **Agent layer (for general vision-language models, deferred).** Here our own loop
    drives the simulator. Each step it builds a text-and-image prompt, calls the
    model, parses its text answer into an action, checks the action, and falls back
