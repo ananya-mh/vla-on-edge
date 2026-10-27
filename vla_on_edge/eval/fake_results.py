@@ -31,6 +31,7 @@ N_STEPS = 200  # runtime.simulation_config.n_sim_steps default
 FORCE_GT_US = 1_700_000  # runtime.simulation_config.force_gt_duration_us default
 START_US = 10_000_000_000
 RUN_NAME = "LR-fake"
+MAX_DIST_TO_GT_M = 4.0  # eval.aggregation_modifiers.max_dist_to_gt_trajectory default
 
 # What happens in each fake scene, in scene-list order.
 STORIES = [
@@ -116,7 +117,7 @@ def aggregate_rollout(rows: list[dict]) -> dict:
         offroad_or_collision_at_fault=((pl.col("collision_at_fault") > 0) | (pl.col("offroad") > 0)).cast(pl.Float64),
         duration_frac_20s=(pl.col("timestamps_us") - pl.col("timestamps_us").min()) / 20e6,
     )
-    for condition in (pl.col("offroad_or_collision") > 0, pl.col("dist_to_gt_trajectory") >= 4.0):
+    for condition in (pl.col("offroad_or_collision") > 0, pl.col("dist_to_gt_trajectory") >= MAX_DIST_TO_GT_M):
         events = wide.filter(condition)
         if len(events):
             wide = wide.filter(pl.col("timestamps_us") <= events["timestamps_us"].min())
@@ -171,6 +172,8 @@ def write_alpasim_outputs(log_dir: Path, scene_id: str, story: dict) -> None:
     rows = rollout_rows(story, scene_id, rollout_id, run_uuid)
     rollout_dir = log_dir / "rollouts" / scene_id / rollout_id
     rollout_dir.mkdir(parents=True)
+    # The part of AlpaSim's eval-config.yaml the report reads (its default: base_config.yaml).
+    (log_dir / "eval-config.yaml").write_text(f"aggregation_modifiers:\n  max_dist_to_gt_trajectory: {MAX_DIST_TO_GT_M}\n")
     pl.DataFrame(rows).write_parquet(rollout_dir / "metrics.parquet")
 
     # Aggregation replaces run_uuid with a hash of the runs (force_same_run=True).

@@ -14,7 +14,7 @@ import matplotlib
 matplotlib.use("Agg")  # no display on the VM
 import matplotlib.pyplot as plt  # noqa: E402
 
-from vla_on_edge.eval.metrics import P99_MIN_SAMPLES, load_stage, model_summary  # noqa: E402
+from vla_on_edge.eval.metrics import EVENT_LABELS, P99_MIN_SAMPLES, load_stage, model_summary  # noqa: E402
 
 WORST_CASE_COUNT = 3
 REASONING_WINDOW_US = 2_000_000  # show reasoning from the 2 s before the failure
@@ -72,15 +72,25 @@ def scenario_table(model: str, summary: dict) -> list[str]:
     return lines
 
 
-def reasoning_near_failure(scene: dict) -> list[tuple[float, str]]:
-    """Return (seconds before the failure, text) for the last distinct reasoning texts.
+def reasoning_anchor(scene: dict) -> tuple[int | None, str]:
+    """Return the moment to show reasoning before, and what it is.
 
-    Uses the 2 s before the first collision/off-road; without one, the end of the run.
+    The first at-fault collision or off-road AlpaSim scored; else the moment AlpaSim
+    stopped scoring (e.g. the ego left the recorded drive); else the end of the run.
     """
+    if scene["event_time_us"] is not None:
+        return scene["event_time_us"], "the first at-fault collision or off-road"
+    if scene["scored_end_us"] is not None:
+        return scene["scored_end_us"], "scoring stopped"
+    return None, "the end of the run"
+
+
+def reasoning_near_failure(scene: dict) -> list[tuple[float, str]]:
+    """Return (seconds before the anchor, text) for the last distinct reasoning texts in the 2 s before it."""
     timed = [r for r in scene["records"] if r["sim_time_us"] is not None and r["reasoning_text"]]
     if not timed:
         return []
-    end_us = scene["event_time_us"] or max(r["sim_time_us"] for r in timed)
+    end_us = reasoning_anchor(scene)[0] or max(r["sim_time_us"] for r in timed)
     window = [r for r in timed if end_us - REASONING_WINDOW_US <= r["sim_time_us"] <= end_us]
     shown, seen = [], set()
     for record in sorted(window, key=lambda r: r["sim_time_us"], reverse=True):
@@ -92,6 +102,34 @@ def reasoning_near_failure(scene: dict) -> list[tuple[float, str]]:
     return shown
 
 
+def outcome(rollout: dict) -> str:
+    """AlpaSim's verdict in words: its failure reason, or that there was none."""
+    if rollout["failure_reason"] == "collision_at_fault":
+        return "failed: at-fault collision"
+    if rollout["failure_reason"] == "offroad":
+        return "failed: off-road"
+    if rollout["failure_reason"]:
+        return f"failed: {rollout['failure_reason']}"
+    progress = rollout["metrics"].get("progress_clipped_rel")
+    return f"no at-fault collision or off-road (progress {fmt(progress)})"
+
+
+def event_lines(scene: dict) -> list[str]:
+    """Say when AlpaSim stopped scoring, and each first collision/off-road and whether it counted."""
+    def seconds_in(time_us: int) -> str:
+        return f"{(time_us - scene['start_time_us']) / 1e6:.1f} s"
+
+    lines = []
+    if scene["scored_end_us"] is not None:
+        lines.append(f"AlpaSim stopped scoring at {seconds_in(scene['scored_end_us'])} into the rollout: "
+                     f"{scene['scored_end_reason']}.")
+    for name, time_us in sorted(scene["event_times_us"].items(), key=lambda item: item[1]):
+        counted = scene["scored_end_us"] is None or time_us <= scene["scored_end_us"]
+        status = "scored" if counted else "after scoring stopped, so not in the score"
+        lines.append(f"- {EVENT_LABELS[name]} at {seconds_in(time_us)} ({status})")
+    return lines
+
+
 def worst_cases(stage: dict[str, list[dict]], report_dir: Path) -> list[str]:
     """The lowest-scoring rollouts, with what the model said just before failing."""
     scenes = [(model, scene) for model, model_scenes in stage.items() for scene in model_scenes]
@@ -99,16 +137,14 @@ def worst_cases(stage: dict[str, list[dict]], report_dir: Path) -> list[str]:
     lines = []
     for model, scene in scenes[:WORST_CASE_COUNT]:
         rollout = scene["rollout"]
-        lines += ["", f"### {model} on `{scene['scene_id']}`: score {fmt(rollout['score'])}, "
-                      f"{rollout['failure_reason'] or 'no hard failure (low progress)'}", ""]
-        if scene["event_time_us"] is not None:
-            seconds_in = (scene["event_time_us"] - scene["start_time_us"]) / 1e6
-            lines.append(f"First collision/off-road {seconds_in:.1f} s into the rollout.")
+        lines += ["", f"### {model} on `{scene['scene_id']}`: score {fmt(rollout['score'])}, {outcome(rollout)}", ""]
+        if scene["start_time_us"] is not None and event_lines(scene):
+            lines += [*event_lines(scene), ""]
         for video in scene["videos"]:
             lines.append(f"Video: [{video.name}]({os.path.relpath(video, report_dir)})")
         reasoning = reasoning_near_failure(scene)
         if reasoning:
-            lines += ["", "Model reasoning, most recent first:"]
+            lines += ["", f"Model reasoning before {reasoning_anchor(scene)[1]}, most recent first:"]
             lines += [f"- {seconds:.1f} s before: \"{text}\"" for seconds, text in reasoning]
         else:
             lines.append("No reasoning text logged (no plugin logs for this run).")

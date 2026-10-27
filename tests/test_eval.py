@@ -7,8 +7,16 @@ import pytest
 
 from vla_on_edge.eval.check_run import check_alpasim_outputs, check_plugin_logs
 from vla_on_edge.eval.fake_results import write_fake_run
-from vla_on_edge.eval.metrics import first_event_time_us, load_stage, model_summary
-from vla_on_edge.eval.report import build_report
+from vla_on_edge.eval.fake_results import STORIES, START_US, rollout_rows
+from vla_on_edge.eval.metrics import (
+    driven_timesteps,
+    first_counted_event_us,
+    first_event_times_us,
+    load_stage,
+    model_summary,
+    scoring_end,
+)
+from vla_on_edge.eval.report import build_report, event_lines, outcome
 
 
 @pytest.fixture(scope="module")
@@ -38,7 +46,10 @@ def test_collision_scene_is_failed_and_truncated(stage_dir):
     assert rollout["metrics"]["progress_clipped_rel"] == pytest.approx(0.45 * 8.3 / 20, abs=0.01)
     parquet = next(collision_dir.glob("rollouts/*/*/metrics.parquet"))
     start = int(pl.read_parquet(parquet)["timestamps_us"].min())
-    assert (first_event_time_us(parquet) - start) / 1e6 == pytest.approx(8.3, abs=0.05)
+    wide = driven_timesteps(parquet)
+    scored_end_us, _ = scoring_end(wide, 4.0)
+    assert (scored_end_us - start) / 1e6 == pytest.approx(8.3, abs=0.05)
+    assert (first_counted_event_us(first_event_times_us(wide), scored_end_us) - start) / 1e6 == pytest.approx(8.3, abs=0.05)
 
 
 def test_headline_numbers(stage_dir):
@@ -65,7 +76,7 @@ def test_report_has_every_section_and_chart(stage_dir, tmp_path):
         assert heading in report
     assert "collision_at_fault" in report and "offroad" in report
     assert "8.3 s into the rollout" in report
-    assert "Model reasoning, most recent first" in report
+    assert "Model reasoning before the first at-fault collision or off-road, most recent first" in report
     for chart in ("score_by_scenario.png", "latency_distribution.png", "validator_flags.png"):
         assert (tmp_path / "charts" / chart).stat().st_size > 0
 
@@ -95,3 +106,57 @@ def test_check_run_detects_logs_from_another_model(stage_dir):
     _, time_range = check_alpasim_outputs(log_dir)
     problems = check_plugin_logs(log_dir, time_range, "alpamayo2_super")
     assert problems == ["some records are not from alpamayo2_super (wrong wrapper?)"]
+
+
+def drifted_then_hit_parquet(tmp_path):
+    """Like stage 1 on VM 2 (alpamayo2_super): >= 4 m from the recorded drive at 10.4 s,
+    then hit from behind at 12.8 s and a front collision at 13.8 s, none of them scored."""
+    rows = rollout_rows(STORIES[0], "scene", "rollout", "run")
+    for row in rows:
+        t_s = (row["timestamps_us"] - START_US) / 1e6
+        if row["name"] == "dist_to_gt_trajectory" and t_s >= 10.4:
+            row["values"] = 4.2
+        if row["name"] in ("collision_rear", "collision_any") and t_s >= 12.8:
+            row["values"] = 1.0
+        if row["name"] == "collision_front" and t_s >= 13.8:
+            row["values"] = 1.0
+    path = tmp_path / "metrics.parquet"
+    pl.DataFrame(rows).write_parquet(path)
+    return path
+
+
+def test_events_after_alpasim_stops_scoring_are_not_counted(tmp_path):
+    wide = driven_timesteps(drifted_then_hit_parquet(tmp_path))
+    scored_end_us, reason = scoring_end(wide, 4.0)
+    assert (scored_end_us - START_US) / 1e6 == pytest.approx(10.4, abs=0.05)
+    assert reason == "the ego was 4 m or more from the recorded drive"
+    events = first_event_times_us(wide)
+    assert set(events) == {"collision_rear", "collision_front"}
+    assert first_counted_event_us(events, scored_end_us) is None
+
+
+def test_worst_case_text_matches_alpasims_verdict(tmp_path):
+    wide = driven_timesteps(drifted_then_hit_parquet(tmp_path))
+    scored_end_us, reason = scoring_end(wide, 4.0)
+    scene = {"start_time_us": START_US, "scored_end_us": scored_end_us, "scored_end_reason": reason,
+             "event_times_us": first_event_times_us(wide)}
+    passed = {"failure_reason": None, "metrics": {"progress_clipped_rel": 1.0}}
+    assert outcome(passed) == "no at-fault collision or off-road (progress 1.00)"
+    assert event_lines(scene) == [
+        "AlpaSim stopped scoring at 10.4 s into the rollout: the ego was 4 m or more from the recorded drive.",
+        "- not-at-fault collision (rear) at 12.8 s (after scoring stopped, so not in the score)",
+        "- at-fault collision (front) at 13.8 s (after scoring stopped, so not in the score)",
+    ]
+    assert outcome({"failure_reason": "collision_at_fault", "metrics": {}}) == "failed: at-fault collision"
+
+
+def test_a_rear_collision_ends_scoring_but_is_not_at_fault(tmp_path):
+    rows = rollout_rows(STORIES[0], "scene", "rollout", "run")
+    for row in rows:
+        if row["name"] in ("collision_rear", "collision_any") and row["timestamps_us"] >= START_US + 9_000_000:
+            row["values"] = 1.0
+    pl.DataFrame(rows).write_parquet(tmp_path / "metrics.parquet")
+    wide = driven_timesteps(tmp_path / "metrics.parquet")
+    scored_end_us, reason = scoring_end(wide, 4.0)
+    assert reason == "the first collision or off-road" and scored_end_us == START_US + 9_000_000
+    assert first_counted_event_us(first_event_times_us(wide), scored_end_us) is None

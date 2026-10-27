@@ -16,12 +16,21 @@ from pathlib import Path
 
 import numpy as np
 import polars as pl
+import yaml
 
 from vla_on_edge.utils.logging import read_jsonl
 
 # A percentile is only shown when there are enough samples for it to mean something.
 P99_MIN_SAMPLES = 1000
-EVENT_METRICS = ("collision_front", "collision_lateral", "offroad")
+# How AlpaSim classes events (eval/aggregation/processing.py, DEFAULT_MODIFIERS):
+# front and lateral collisions are at fault, rear ones are not.
+EVENT_LABELS = {
+    "collision_front": "at-fault collision (front)",
+    "collision_lateral": "at-fault collision (lateral)",
+    "collision_rear": "not-at-fault collision (rear)",
+    "offroad": "off-road",
+}
+AT_FAULT_EVENTS = ("collision_front", "collision_lateral", "offroad")
 
 
 def rollout_start_us(metrics_parquet: Path) -> int:
@@ -29,17 +38,59 @@ def rollout_start_us(metrics_parquet: Path) -> int:
     return int(pl.read_parquet(metrics_parquet, columns=["timestamps_us"])["timestamps_us"].min())
 
 
-def first_event_time_us(metrics_parquet: Path) -> int | None:
-    """Return the first driven timestep with an at-fault collision or off-road, if any."""
+def driven_timesteps(metrics_parquet: Path) -> pl.DataFrame:
+    """Per-timestep metrics in wide form, from the first eval_relevant step on (as AlpaSim scores)."""
     long = pl.read_parquet(metrics_parquet)
     wide = long.pivot(on="name", index="timestamps_us", values="values").sort("timestamps_us")
-    driven = wide.filter(pl.col("eval_relevant") > 0)
-    present = [name for name in EVENT_METRICS if name in driven.columns]
-    if not present:
-        return None
-    any_event = pl.any_horizontal([pl.col(name) > 0 for name in present])
-    events = driven.filter(any_event)
-    return int(events["timestamps_us"].min()) if len(events) else None
+    return wide.filter(pl.col("timestamps_us") >= wide.filter(pl.col("eval_relevant") > 0)["timestamps_us"].min())
+
+
+def first_time_us(wide: pl.DataFrame, condition: pl.Expr) -> int | None:
+    """Return the first timestamp where `condition` holds, or None."""
+    matching = wide.filter(condition)
+    return int(matching["timestamps_us"].min()) if len(matching) else None
+
+
+def scoring_end(wide: pl.DataFrame, max_dist_to_gt_m: float) -> tuple[int | None, str | None]:
+    """Return when AlpaSim stops scoring the rollout and why (None, None if it scores to the end).
+
+    Mirrors AlpaSim's two cuts, in its order: keep timesteps up to the first collision
+    (any, including rear) or off-road (processing.py, DEFAULT_MODIFIERS), then up to
+    the first one at least max_dist_to_gt_m from the recorded drive (aggregation/main.py).
+    Events after the end are in metrics.parquet but not in AlpaSim's scores.
+    """
+    collision_us = first_time_us(wide, (pl.col("collision_any") > 0) | (pl.col("offroad") > 0))
+    kept = wide if collision_us is None else wide.filter(pl.col("timestamps_us") <= collision_us)
+    far_us = first_time_us(kept, pl.col("dist_to_gt_trajectory") >= max_dist_to_gt_m)
+    if far_us is not None:
+        return far_us, f"the ego was {max_dist_to_gt_m:g} m or more from the recorded drive"
+    if collision_us is not None:
+        return collision_us, "the first collision or off-road"
+    return None, None
+
+
+def first_event_times_us(wide: pl.DataFrame) -> dict[str, int]:
+    """Return the first timestep of each kind of event in EVENT_LABELS that happens."""
+    times = {}
+    for name in EVENT_LABELS:
+        if name in wide.columns:
+            time_us = first_time_us(wide, pl.col(name) > 0)
+            if time_us is not None:
+                times[name] = time_us
+    return times
+
+
+def first_counted_event_us(event_times_us: dict[str, int], scored_end_us: int | None) -> int | None:
+    """Return the first at-fault collision or off-road that AlpaSim scored, if any."""
+    counted = [time_us for name, time_us in event_times_us.items()
+               if name in AT_FAULT_EVENTS and (scored_end_us is None or time_us <= scored_end_us)]
+    return min(counted) if counted else None
+
+
+def max_dist_to_gt_m(log_dir: Path) -> float:
+    """AlpaSim's eval.aggregation_modifiers.max_dist_to_gt_trajectory for this run."""
+    with open(log_dir / "eval-config.yaml", encoding="utf-8") as file:
+        return float(yaml.safe_load(file)["aggregation_modifiers"]["max_dist_to_gt_trajectory"])
 
 
 def jerk_values(records: list[dict]) -> list[float]:
@@ -67,12 +118,24 @@ def load_scene(log_dir: Path) -> dict:
     rollout_dir = log_dir / "rollouts" / rollout["clipgt_id"] / rollout["rollout_id"]
     metrics_parquet = rollout_dir / "metrics.parquet"
     steps_path = log_dir / "vla_on_edge" / "steps.jsonl"
+    scene = {"start_time_us": None, "scored_end_us": None, "scored_end_reason": None,
+             "event_times_us": {}, "event_time_us": None}
+    if metrics_parquet.exists():
+        wide = driven_timesteps(metrics_parquet)
+        scored_end_us, scored_end_reason = scoring_end(wide, max_dist_to_gt_m(log_dir))
+        event_times_us = first_event_times_us(wide)
+        scene = {
+            "start_time_us": rollout_start_us(metrics_parquet),
+            "scored_end_us": scored_end_us,
+            "scored_end_reason": scored_end_reason,
+            "event_times_us": event_times_us,  # every first event, scored or not
+            "event_time_us": first_counted_event_us(event_times_us, scored_end_us),
+        }
     return {
+        **scene,
         "scene_id": rollout["clipgt_id"],
         "rollout": rollout,
         "rollout_dir": rollout_dir,
-        "event_time_us": first_event_time_us(metrics_parquet) if metrics_parquet.exists() else None,
-        "start_time_us": rollout_start_us(metrics_parquet) if metrics_parquet.exists() else None,
         "records": read_jsonl(steps_path) if steps_path.exists() else [],
         "videos": sorted(rollout_dir.glob("*.mp4")),
     }
